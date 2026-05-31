@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}{{ category.name }}{% endblock %}
+
+{% block content %}
+<div class="flex items-center gap-3 mb-6">
+  <h1 class="text-xl font-bold" style="color:var(--color-text);">{{ category.name }}</h1>
+  <span class="text-sm" style="color:var(--color-muted);">{{ total }} 个视频</span>
+</div>
+
+{% if videos %}
+<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+  {% for v in videos %}{% include "frontend/_video_card.html" %}{% endfor %}
+</div>
+
+{% if pages > 1 %}
+<div class="flex justify-center items-center gap-2 mt-8">
+  {% if page > 1 %}<a href="/category/{{ category.slug }}?page={{ page-1 }}" class="pagination-btn">{{ t.prev_page }}</a>{% endif %}
+  <span class="text-sm" style="color:var(--color-muted);">{{ page }} / {{ pages }}</span>
+  {% if page < pages %}<a href="/category/{{ category.slug }}?page={{ page+1 }}" class="pagination-btn">{{ t.next_page }}</a>{% endif %}
+</div>
+{% endif %}
+{% else %}
+<div class="text-center py-20" style="color:var(--color-muted);">
+  <p>{{ t.no_videos }}</p>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}{{ t.home }}{% endblock %}
+
+{% block content %}
+
+<!-- 分类筛选导航 -->
+<div class="mb-5 flex flex-wrap items-center gap-2">
+  <a href="/" class="filter-chip {% if not category_id %}filter-chip-active{% endif %}">{{ t.all_categories }}</a>
+  {% for cat in categories %}
+  <a href="/?category_id={{ cat.id }}" class="filter-chip {% if category_id == cat.id %}filter-chip-active{% endif %}">{{ cat.name }}</a>
+  {% endfor %}
+
+  <!-- 排序 -->
+  <div class="ml-auto flex items-center gap-2">
+    <span class="text-sm" style="color:var(--color-muted);">{{ t.sort_by }}：</span>
+    <a href="/?{% if category_id %}category_id={{ category_id }}&{% endif %}sort=created_at"
+       class="filter-chip {% if sort=='created_at' %}filter-chip-active{% endif %}">{{ t.sort_latest }}</a>
+    <a href="/?{% if category_id %}category_id={{ category_id }}&{% endif %}sort=views"
+       class="filter-chip {% if sort=='views' %}filter-chip-active{% endif %}">{{ t.sort_views }}</a>
+  </div>
+</div>
+
+<!-- 当前筛选状态 -->
+{% if selected_cat %}
+<div class="mb-4 flex items-center gap-2">
+  <span class="text-sm font-medium" style="color:var(--color-text);">{{ selected_cat.name }}</span>
+  <a href="/" class="text-xs px-2.5 py-1 rounded-full border hover:border-primary-400 transition-colors"
+     style="border-color:var(--color-border); color:var(--color-muted);">{{ t.clear_filter }} ✕</a>
+</div>
+{% endif %}
+
+<!-- 视频计数 -->
+<div class="flex items-center justify-between mb-4">
+  <h2 class="text-base font-semibold" style="color:var(--color-text);">
+    {% if selected_cat %}{{ selected_cat.name }}{% else %}{{ t.latest_videos }}{% endif %}
+  </h2>
+  <span class="text-sm" style="color:var(--color-muted);">{{ total }} 个视频</span>
+</div>
+
+<!-- 视频网格 -->
+{% if videos %}
+<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+  {% for v in videos %}{% include "frontend/_video_card.html" %}{% endfor %}
+</div>
+
+<!-- 分页 -->
+{% if pages > 1 %}
+<div class="flex justify-center items-center gap-2 mt-8">
+  {% if page > 1 %}
+  <a href="/?page={{ page-1 }}&sort={{ sort }}{% if category_id %}&category_id={{ category_id }}{% endif %}"
+     class="pagination-btn">{{ t.prev_page }}</a>
+  {% endif %}
+  {% for p in range([1, page-2]|max, [pages+1, page+3]|min) %}
+    {% if p == page %}
+    <span class="pagination-btn pagination-active">{{ p }}</span>
+    {% else %}
+    <a href="/?page={{ p }}&sort={{ sort }}{% if category_id %}&category_id={{ category_id }}{% endif %}"
+       class="pagination-btn">{{ p }}</a>
+    {% endif %}
+  {% endfor %}
+  {% if page < pages %}
+  <a href="/?page={{ page+1 }}&sort={{ sort }}{% if category_id %}&category_id={{ category_id }}{% endif %}"
+     class="pagination-btn">{{ t.next_page }}</a>
+  {% endif %}
+</div>
+{% endif %}
+
+{% else %}
+<div class="text-center py-20" style="color:var(--color-muted);">
+  <svg class="w-16 h-16 mx-auto mb-4 opacity-20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 10l4.553-2.069A1 1 0 0121 8.82v6.361a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"/>
+  </svg>
+  <p class="text-base">{{ t.no_videos }}</p>
+</div>
+{% endif %}
+
+{% endblock %}

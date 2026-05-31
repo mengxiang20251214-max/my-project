@@ -1,29 +1,36 @@
 {% extends "admin/base.html" %}
-{% block title %}系统设置{% endblock %}
-{% block page_title %}系统设置{% endblock %}
+{% block title %}网站设置{% endblock %}
+{% block page_title %}网站设置{% endblock %}
 
 {% block content %}
-<div class="max-w-lg">
+<div class="max-w-lg space-y-5">
+
   {% if saved %}
-  <div class="mb-4 px-4 py-3 rounded-xl border text-sm flex items-center gap-2"
+  <div class="px-4 py-3 rounded-xl border text-sm flex items-center gap-2"
        style="background:rgba(16,185,129,0.08); border-color:rgba(16,185,129,0.3); color:#10b981;">
-    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+    <svg class="w-4 h-4 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
     设置已保存
   </div>
   {% endif %}
 
+  <!-- ── 基本设置 ── -->
   <div class="rounded-2xl border p-5" style="background:var(--color-card); border-color:var(--color-border);">
+    <h3 class="font-semibold text-sm mb-4" style="color:var(--color-text);">基本信息</h3>
     <form method="post" action="/admin/settings" class="space-y-4">
       <div>
-        <label class="form-label">网站名称</label>
+        <label class="form-label">网站名称 <span class="font-normal opacity-60">（导航 Logo 显示）</span></label>
         <input name="site_name" type="text" value="{{ settings.get('site_name','VideoHub Pro') }}" class="form-input">
+      </div>
+      <div>
+        <label class="form-label">网页标题 <span class="font-normal opacity-60">（浏览器标签页 · 默认：视频博客）</span></label>
+        <input name="site_title" type="text" value="{{ settings.get('site_title','视频博客') }}" class="form-input" placeholder="视频博客">
       </div>
       <div>
         <label class="form-label">网站描述</label>
         <textarea name="site_description" rows="2" class="form-input resize-none">{{ settings.get('site_description','') }}</textarea>
       </div>
       <div>
-        <label class="form-label">SEO 关键词 <span class="font-normal" style="color:var(--color-muted);">（逗号分隔）</span></label>
+        <label class="form-label">SEO 关键词 <span class="font-normal opacity-60">（逗号分隔）</span></label>
         <input name="site_keywords" type="text" value="{{ settings.get('site_keywords','') }}" class="form-input" placeholder="视频,博客,教程">
       </div>
       <div>
@@ -36,7 +43,35 @@
     </form>
   </div>
 
-  <div class="rounded-2xl border p-5 mt-4" style="background:var(--color-card); border-color:var(--color-border);">
+  <!-- ── 网站图标 ── -->
+  <div class="rounded-2xl border p-5" style="background:var(--color-card); border-color:var(--color-border);">
+    <h3 class="font-semibold text-sm mb-1" style="color:var(--color-text);">网站图标（Favicon）</h3>
+    <p class="text-xs mb-4" style="color:var(--color-muted);">支持 .ico / .png / .svg，建议尺寸 32×32 或 64×64，上传后自动显示在浏览器标签页。</p>
+
+    {% if settings.get('site_icon') %}
+    <div class="flex items-center gap-3 mb-4 p-3 rounded-xl" style="background:var(--color-input);">
+      <img src="{{ settings.get('site_icon') }}" alt="favicon"
+           class="w-8 h-8 rounded object-contain" style="background:#fff; padding:2px;">
+      <div>
+        <p class="text-xs font-medium" style="color:var(--color-text);">当前图标</p>
+        <p class="text-xs opacity-50 font-mono">{{ settings.get('site_icon') }}</p>
+      </div>
+    </div>
+    {% endif %}
+
+    <form method="post" action="/admin/settings/favicon" enctype="multipart/form-data" class="space-y-3">
+      <div>
+        <label class="form-label">选择图标文件</label>
+        <input name="favicon_file" type="file" accept=".ico,.png,.jpg,.jpeg,.svg,.webp" required
+               class="form-input file:mr-3 file:px-3 file:py-1 file:rounded-full file:border-0 file:text-xs file:font-medium file:text-white file:cursor-pointer"
+               style="file:background:var(--grad-primary);">
+      </div>
+      <button type="submit" class="px-5 py-2 rounded-xl text-sm font-semibold text-white bg-grad-primary hover:opacity-90 transition-opacity">上传图标</button>
+    </form>
+  </div>
+
+  <!-- ── 开发者工具 ── -->
+  <div class="rounded-2xl border p-5" style="background:var(--color-card); border-color:var(--color-border);">
     <h3 class="font-semibold text-sm mb-3" style="color:var(--color-text);">开发者工具</h3>
     <div class="space-y-2 text-sm">
       <div class="flex justify-between py-2 border-b" style="border-color:var(--color-border);">
@@ -49,5 +84,6 @@
       </div>
     </div>
   </div>
+
 </div>
 {% endblock %}

@@ -83,6 +83,7 @@ class SiteSetting(Base):
     """网站全局配置（键值对）。"""
     __tablename__ = "site_settings"
 
-    id:    Mapped[int] = mapped_column(Integer, primary_key=True)
-    key:   Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
-    value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    id:         Mapped[int] = mapped_column(Integer, primary_key=True)
+    key:        Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    value:      Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)

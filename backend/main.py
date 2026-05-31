@@ -78,6 +78,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
 
 
 def get_language(request: Request) -> str:
+    # 优先读 cookie（由前端 JS 语言切换按钮写入）
+    cookie_lang = request.cookies.get("lang", "")
+    if cookie_lang in TRANSLATIONS:
+        return cookie_lang
     accept = request.headers.get("accept-language", "zh")
     primary = accept.split(",")[0].split(";")[0].split("-")[0].lower().strip()
     return primary if primary in TRANSLATIONS else "zh"
@@ -105,6 +109,7 @@ def startup_event():
     try:
         _seed_data(db)
         _seed_banners(db)
+        _ensure_settings(db)
     finally:
         db.close()
 
@@ -184,6 +189,13 @@ def _migrate_db():
                     conn.execute(text(ddl))
                     logger.info("videos 表新增列: %s", col)
 
+        # site_settings: 补充 updated_at 列
+        if "site_settings" in insp.get_table_names():
+            ss_cols = {c["name"] for c in insp.get_columns("site_settings")}
+            if "updated_at" not in ss_cols:
+                conn.execute(text("ALTER TABLE site_settings ADD COLUMN updated_at DATETIME"))
+                logger.info("site_settings 表新增列: updated_at")
+
         conn.commit()
 
 
@@ -202,8 +214,10 @@ def _seed_data(db: Session):
         db.add(c); db.flush()
         cats[slug] = c
 
-    for k, v in {"site_name":"VideoHub Pro","site_description":"专业视频博客平台",
-                  "site_keywords":"视频,博客","footer_text":"© 2024 VideoHub Pro."}.items():
+    for k, v in {"site_name":"VideoHub Pro","site_title":"视频博客",
+                  "site_description":"专业视频博客平台",
+                  "site_keywords":"视频,博客","footer_text":"© 2024 VideoHub Pro.",
+                  "site_icon":""}.items():
         db.add(SiteSetting(key=k, value=v))
 
     # 示例视频
@@ -238,6 +252,18 @@ def _seed_data(db: Session):
                      cover_url=cover_url, category_id=cats[cat_slug].id,
                      user_id=admin.id))
     db.commit()
+
+
+def _ensure_settings(db: Session):
+    """确保升级旧版时必要的配置键存在。"""
+    defaults = {"site_title": "视频博客", "site_icon": ""}
+    changed = False
+    for k, v in defaults.items():
+        if not db.query(SiteSetting).filter(SiteSetting.key == k).first():
+            db.add(SiteSetting(key=k, value=v))
+            changed = True
+    if changed:
+        db.commit()
 
 
 def _seed_banners(db: Session):
@@ -381,7 +407,7 @@ def index(
     ctx.update({"videos": videos, "page": page, "total": total,
                 "pages": max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE),
                 "category_id": category_id, "selected_cat": selected_cat, "sort": sort})
-    return templates.TemplateResponse(request, "index.html", ctx)
+    return templates.TemplateResponse(request, "frontend/index.html", ctx)
 
 
 @app.get("/video/{video_id}", response_class=HTMLResponse)
@@ -402,7 +428,7 @@ def video_detail(
                ) if video.category_id else []
     ctx = _base_ctx(request, db, current_user)
     ctx.update({"video": video, "related": related, "fmt_size": _fmt_size})
-    return templates.TemplateResponse(request, "video.html", ctx)
+    return templates.TemplateResponse(request, "frontend/video.html", ctx)
 
 
 @app.get("/search", response_class=HTMLResponse)
@@ -430,7 +456,7 @@ def search_page(
     ctx.update({"videos": videos, "q": q, "category_id": category_id, "sort": sort,
                 "page": page, "total": total,
                 "pages": max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)})
-    return templates.TemplateResponse(request, "search.html", ctx)
+    return templates.TemplateResponse(request, "frontend/search.html", ctx)
 
 
 @app.get("/category/{slug}", response_class=HTMLResponse)
@@ -449,7 +475,7 @@ def category_page(
     ctx = _base_ctx(request, db, current_user)
     ctx.update({"category": cat, "videos": videos, "page": page, "total": total,
                 "pages": max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)})
-    return templates.TemplateResponse(request, "category.html", ctx)
+    return templates.TemplateResponse(request, "frontend/category.html", ctx)
 
 
 # ── 认证 ────────────────────────────────────────────────────────────────────────
@@ -457,7 +483,7 @@ def category_page(
 def login_page(request: Request, next: str = "/", db: Session = Depends(get_db)):
     ctx = _base_ctx(request, db)
     ctx["next"] = next
-    return templates.TemplateResponse(request, "login.html", ctx)
+    return templates.TemplateResponse(request, "frontend/login.html", ctx)
 
 
 @app.post("/login")
@@ -471,7 +497,7 @@ def login_submit(
         ctx = _base_ctx(request, db)
         t = TRANSLATIONS.get(get_language(request), TRANSLATIONS["zh"])
         ctx.update({"error": t["login_error"], "next": next})
-        return templates.TemplateResponse(request, "login.html", ctx, status_code=401)
+        return templates.TemplateResponse(request, "frontend/login.html", ctx, status_code=401)
     token = create_access_token({"sub": user.username})
     resp = RedirectResponse(url=next if next.startswith("/") else "/", status_code=302)
     resp.set_cookie("access_token", token, httponly=True, max_age=86400 * 7, samesite="lax")
@@ -844,30 +870,69 @@ def admin_del_banner(
 def admin_settings(
     request: Request, db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user),
+    saved: bool = Query(False),
 ):
     r = _require_admin(current_user, request)
     if r: return r
     return templates.TemplateResponse(request, "admin/settings.html",
-                                      _admin_ctx(request, db, current_user, saved=False))
+                                      _admin_ctx(request, db, current_user, saved=saved))
 
 
 @app.post("/admin/settings")
 def admin_settings_save(
     request: Request,
-    site_name: str = Form(""), site_description: str = Form(""),
-    site_keywords: str = Form(""), footer_text: str = Form(""),
+    site_name: str = Form(""), site_title: str = Form(""),
+    site_description: str = Form(""), site_keywords: str = Form(""),
+    footer_text: str = Form(""),
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user),
 ):
     r = _require_admin(current_user, request)
     if r: return r
-    for k, v in {"site_name": site_name, "site_description": site_description,
-                 "site_keywords": site_keywords, "footer_text": footer_text}.items():
+    for k, v in {
+        "site_name": site_name, "site_title": site_title,
+        "site_description": site_description,
+        "site_keywords": site_keywords, "footer_text": footer_text,
+    }.items():
         row = db.query(SiteSetting).filter(SiteSetting.key == k).first()
         if row:
             row.value = v
         else:
             db.add(SiteSetting(key=k, value=v))
     db.commit()
-    return templates.TemplateResponse(request, "admin/settings.html",
-                                      _admin_ctx(request, db, current_user, saved=True))
+    return RedirectResponse(url="/admin/settings?saved=1", status_code=302)
+
+
+@app.post("/admin/settings/favicon")
+async def admin_favicon_upload(
+    request: Request,
+    favicon_file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user),
+):
+    """上传网站图标，保存到 static/ 目录并记录到 site_settings。"""
+    r = _require_admin(current_user, request)
+    if r: return r
+    ext = os.path.splitext(favicon_file.filename or "favicon")[1].lower()
+    if ext not in {".ico", ".png", ".jpg", ".jpeg", ".svg", ".webp"}:
+        ext = ".ico"
+    dest_name = f"favicon{ext}"
+    dest_path = os.path.abspath(os.path.join(STATIC_DIR, dest_name))
+    try:
+        async with aiofiles.open(dest_path, "wb") as f:
+            while True:
+                chunk = await favicon_file.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                await f.write(chunk)
+    except Exception as exc:
+        logger.exception("保存 Favicon 失败: %s", exc)
+        raise HTTPException(status_code=500, detail=f"上传失败：{exc}")
+    icon_url = f"/static/{dest_name}"
+    row = db.query(SiteSetting).filter(SiteSetting.key == "site_icon").first()
+    if row:
+        row.value = icon_url
+    else:
+        db.add(SiteSetting(key="site_icon", value=icon_url))
+    db.commit()
+    return RedirectResponse(url="/admin/settings?saved=1", status_code=302)

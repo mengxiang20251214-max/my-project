@@ -1,6 +1,7 @@
 /**
- * VideoHub Pro v3 — 主 JavaScript
+ * VideoHub Pro — 主 JavaScript
  * • initBannerSwiper(): Swiper 轮播初始化
+ * • setLang(): 语言切换（localStorage + cookie → 服务端重渲染）
  * • 工具函数：Toast、外链安全、图片容错
  */
 
@@ -53,8 +54,34 @@ function initBannerSwiper(selector, opts = {}) {
   }
 }
 
+// ── 语言切换 ────────────────────────────────────────────────────────────────────
+
+const VALID_LANGS = ['zh', 'en', 'id'];
+
+/**
+ * 切换界面语言：写入 localStorage 和 cookie，然后刷新页面让服务端重渲染。
+ * @param {string} lang  'zh' | 'en' | 'id'
+ */
+function setLang(lang) {
+  if (!VALID_LANGS.includes(lang)) return;
+  localStorage.setItem('lang', lang);
+  document.cookie = `lang=${lang};path=/;max-age=31536000;samesite=lax`;
+  location.reload();
+}
+
 // ── DOM 就绪初始化 ──────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+  // 同步 localStorage 语言偏好 → cookie，若与当前页不符则重载
+  const storedLang = localStorage.getItem('lang');
+  if (storedLang && VALID_LANGS.includes(storedLang)) {
+    const currentLang = document.documentElement.lang || 'zh';
+    if (storedLang !== currentLang) {
+      document.cookie = `lang=${storedLang};path=/;max-age=31536000;samesite=lax`;
+      location.reload();
+      return;
+    }
+  }
+
   fixExternalLinks();
   fixBrokenImages();
 });
@@ -82,7 +109,7 @@ function showToast(msg, type = 'info', duration = 3000) {
     padding:    '0.75rem 1rem', borderRadius:'0.75rem',
     color:      '#fff', fontSize:'0.875rem',
     background: colors[type] || colors.info,
-    boxShadow:  '0 4px 12px rgba(0,0,0,0.15)',
+    boxShadow:  '0 4px 12px rgba(0,0,0,0.3)',
     transition: 'opacity .3s, transform .3s',
   });
   el.textContent = msg;

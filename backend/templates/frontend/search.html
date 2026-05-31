@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}{{ t.search }}{% if q %} · {{ q }}{% endif %}{% endblock %}
+
+{% block content %}
+
+<!-- 搜索表单 -->
+<div class="rounded-2xl border p-5 mb-6" style="background:var(--color-card); border-color:var(--color-border);">
+  <form method="get" action="/search" class="flex flex-wrap gap-3 items-end">
+    <div class="flex-1 min-w-[180px]">
+      <label class="block text-xs mb-1.5" style="color:var(--color-muted);">{{ t.keyword }}</label>
+      <input name="q" value="{{ q }}" placeholder="{{ t.search_placeholder }}"
+        class="w-full px-4 py-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/30 transition-all"
+        style="background:var(--color-input); border-color:var(--color-border); color:var(--color-text);">
+    </div>
+    <div>
+      <label class="block text-xs mb-1.5" style="color:var(--color-muted);">{{ t.filter_category }}</label>
+      <select name="category_id" class="px-4 py-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/30"
+        style="background:var(--color-input); border-color:var(--color-border); color:var(--color-text);">
+        <option value="">{{ t.all_categories }}</option>
+        {% for cat in categories %}
+        <option value="{{ cat.id }}" {% if category_id == cat.id %}selected{% endif %}>{{ cat.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="block text-xs mb-1.5" style="color:var(--color-muted);">{{ t.sort_by }}</label>
+      <select name="sort" class="px-4 py-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/30"
+        style="background:var(--color-input); border-color:var(--color-border); color:var(--color-text);">
+        <option value="created_at" {% if sort=='created_at' %}selected{% endif %}>{{ t.sort_latest }}</option>
+        <option value="views"      {% if sort=='views'      %}selected{% endif %}>{{ t.sort_views }}</option>
+      </select>
+    </div>
+    <button type="submit" class="px-6 py-2.5 rounded-xl text-sm font-semibold text-white bg-grad-primary hover:opacity-90 transition-opacity">{{ t.search }}</button>
+    {% if q or category_id %}
+    <a href="/search" class="px-4 py-2.5 rounded-xl border text-sm hover:border-primary-400 transition-colors" style="border-color:var(--color-border); color:var(--color-muted);">{{ t.clear_filter }}</a>
+    {% endif %}
+  </form>
+</div>
+
+<!-- 结果统计 -->
+<div class="flex items-center justify-between mb-4">
+  <h2 class="text-base font-semibold" style="color:var(--color-text);">
+    {% if q %}{{ t.search }}「<span class="text-primary-500">{{ q }}</span>」{% else %}{{ t.latest_videos }}{% endif %}
+  </h2>
+  <span class="text-sm" style="color:var(--color-muted);">{{ total }} 个视频</span>
+</div>
+
+<!-- 结果网格 -->
+{% if videos %}
+<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+  {% for v in videos %}{% include "frontend/_video_card.html" %}{% endfor %}
+</div>
+
+{% if pages > 1 %}
+<div class="flex justify-center items-center gap-2 mt-8">
+  {% set qs = 'q='~q~'&category_id='~(category_id or '')~'&sort='~sort %}
+  {% if page > 1 %}<a href="/search?{{ qs }}&page={{ page-1 }}" class="pagination-btn">{{ t.prev_page }}</a>{% endif %}
+  <span class="text-sm" style="color:var(--color-muted);">{{ page }} / {{ pages }}</span>
+  {% if page < pages %}<a href="/search?{{ qs }}&page={{ page+1 }}" class="pagination-btn">{{ t.next_page }}</a>{% endif %}
+</div>
+{% endif %}
+
+{% else %}
+<div class="text-center py-20" style="color:var(--color-muted);">
+  <svg class="w-16 h-16 mx-auto mb-4 opacity-20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+  </svg>
+  <p class="text-base">{{ t.no_results }}</p>
+</div>
+{% endif %}
+
+{% endblock %}
