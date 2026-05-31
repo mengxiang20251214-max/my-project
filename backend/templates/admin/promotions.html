@@ -1,0 +1,145 @@
+{% extends "admin/base.html" %}
+{% block title %}推广位管理{% endblock %}
+{% block page_title %}推广位管理{% endblock %}
+
+{% block content %}
+
+<!-- 新增推广位 -->
+<div x-data="{open:false}" class="mb-5">
+  <button @click="open=!open"
+    class="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white bg-grad-primary hover:opacity-90 transition-opacity shadow">
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+    新增推广位
+  </button>
+
+  <div x-show="open" x-transition class="mt-3 rounded-2xl border p-5 max-w-lg" style="background:var(--color-card); border-color:var(--color-border);">
+    <h3 class="font-semibold text-sm mb-4" style="color:var(--color-text);">新建推广位</h3>
+    <form method="post" action="/admin/promotions/add" class="space-y-3">
+      <div>
+        <label class="form-label">位置 *</label>
+        <select name="position" class="form-input" required>
+          <option value="top">顶部横幅（全宽）</option>
+          <option value="left">左侧侧边栏</option>
+          <option value="right">右侧侧边栏</option>
+        </select>
+      </div>
+      <div>
+        <label class="form-label">推广标题</label>
+        <input name="title" type="text" placeholder="可选标题或说明" class="form-input">
+      </div>
+      <div>
+        <label class="form-label">图片地址</label>
+        <input name="image_url" type="text" placeholder="https://... 图片 URL" class="form-input">
+      </div>
+      <div>
+        <label class="form-label">跳转链接</label>
+        <input name="link_url" type="text" placeholder="https://..." class="form-input">
+      </div>
+      <div>
+        <label class="form-label">排序值（数值越小越靠前）</label>
+        <input name="sort_order" type="number" value="0" class="form-input" style="max-width:120px;">
+      </div>
+      <div class="flex gap-3 pt-1">
+        <button type="submit" class="px-5 py-2 rounded-xl text-sm font-semibold text-white bg-grad-primary">添加</button>
+        <button type="button" @click="open=false" class="px-5 py-2 rounded-xl text-sm border" style="border-color:var(--color-border);">取消</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- 推广位列表（按位置分组） -->
+{% for pos, pos_label in [('top','顶部横幅'), ('left','左侧侧边栏'), ('right','右侧侧边栏')] %}
+{% set pos_promos = promos | selectattr('position','eq',pos) | list %}
+<div class="mb-5">
+  <h3 class="text-sm font-semibold mb-2 flex items-center gap-2" style="color:var(--color-text);">
+    <span class="w-2 h-2 rounded-full" style="background:var(--grad-primary);"></span>
+    {{ pos_label }}
+    <span class="text-xs font-normal" style="color:var(--color-muted);">（{{ pos_promos|length }} 条）</span>
+  </h3>
+
+  <div class="rounded-2xl border overflow-hidden" style="background:var(--color-card); border-color:var(--color-border);">
+    {% if pos_promos %}
+    <div class="divide-y" style="border-color:var(--color-border);">
+      {% for p in pos_promos %}
+      <div class="p-4 flex gap-4" x-data="{editing:false,deleting:false}">
+        <!-- 预览图 -->
+        <div class="shrink-0 rounded-lg overflow-hidden border" style="width:100px; height:60px; border-color:var(--color-border); background:var(--color-input);">
+          {% if p.image_url %}
+          <img src="{{ p.image_url }}" class="w-full h-full object-cover" alt="">
+          {% else %}
+          <div class="w-full h-full flex items-center justify-center text-xs" style="color:var(--color-muted);">无图片</div>
+          {% endif %}
+        </div>
+
+        <!-- 信息 -->
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 flex-wrap mb-1">
+            <span class="text-sm font-medium" style="color:var(--color-text);">{{ p.title or '（无标题）' }}</span>
+            <span class="px-2 py-0.5 rounded-full text-xs font-medium {% if p.is_active %}text-green-600{% else %}text-gray-400{% endif %}"
+              style="background:{% if p.is_active %}rgba(16,185,129,0.1){% else %}rgba(156,163,175,0.1){% endif %};">
+              {% if p.is_active %}启用{% else %}停用{% endif %}
+            </span>
+          </div>
+          {% if p.link_url %}
+          <p class="text-xs truncate max-w-[280px]" style="color:var(--color-muted);">{{ p.link_url }}</p>
+          {% endif %}
+          <p class="text-xs mt-0.5" style="color:var(--color-muted);">排序 {{ p.sort_order }} · {{ p.created_at.strftime('%Y-%m-%d') }}</p>
+        </div>
+
+        <!-- 操作按钮 -->
+        <div class="flex flex-col gap-1 shrink-0">
+          <form method="post" action="/admin/promotions/{{ p.id }}/toggle">
+            <button type="submit" class="admin-btn-sm w-full" style="color:{% if p.is_active %}#f59e0b{% else %}#10b981{% endif %};">
+              {% if p.is_active %}停用{% else %}启用{% endif %}
+            </button>
+          </form>
+          <button @click="editing=!editing" class="admin-btn-sm" style="color:#6366f1;">编辑</button>
+          <button @click="deleting=!deleting" class="admin-btn-sm" style="color:#ef4444;">删除</button>
+        </div>
+
+        <!-- 编辑表单 -->
+        <div x-show="editing" x-transition class="basis-full mt-3 p-4 rounded-xl border" style="background:var(--color-input); border-color:var(--color-border);">
+          <form method="post" action="/admin/promotions/{{ p.id }}/edit" class="grid sm:grid-cols-2 gap-3">
+            <div class="sm:col-span-2">
+              <label class="form-label">推广标题</label>
+              <input name="title" type="text" value="{{ p.title or '' }}" class="form-input">
+            </div>
+            <div class="sm:col-span-2">
+              <label class="form-label">图片地址</label>
+              <input name="image_url" type="text" value="{{ p.image_url or '' }}" class="form-input">
+            </div>
+            <div>
+              <label class="form-label">跳转链接</label>
+              <input name="link_url" type="text" value="{{ p.link_url or '' }}" class="form-input">
+            </div>
+            <div>
+              <label class="form-label">排序值</label>
+              <input name="sort_order" type="number" value="{{ p.sort_order }}" class="form-input">
+            </div>
+            <div class="sm:col-span-2 flex gap-2">
+              <button type="submit" class="px-4 py-1.5 rounded-lg text-xs font-semibold text-white bg-grad-primary">保存</button>
+              <button type="button" @click="editing=false" class="px-4 py-1.5 rounded-lg text-xs border" style="border-color:var(--color-border);">取消</button>
+            </div>
+          </form>
+        </div>
+
+        <!-- 删除确认 -->
+        <div x-show="deleting" x-transition class="basis-full mt-2 p-3 rounded-xl border" style="background:rgba(239,68,68,0.06); border-color:rgba(239,68,68,0.2);">
+          <p class="text-xs mb-2" style="color:#ef4444;">确认删除该推广位？</p>
+          <div class="flex gap-2">
+            <form method="post" action="/admin/promotions/{{ p.id }}/delete">
+              <button type="submit" class="px-3 py-1 rounded-lg text-xs text-white bg-red-500">确认</button>
+            </form>
+            <button @click="deleting=false" class="px-3 py-1 rounded-lg text-xs border" style="border-color:var(--color-border);">取消</button>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="px-5 py-6 text-center text-sm" style="color:var(--color-muted);">该位置暂无推广内容</div>
+    {% endif %}
+  </div>
+</div>
+{% endfor %}
+{% endblock %}

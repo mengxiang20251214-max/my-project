@@ -1,0 +1,53 @@
+{% extends "admin/base.html" %}
+{% block title %}系统设置{% endblock %}
+{% block page_title %}系统设置{% endblock %}
+
+{% block content %}
+<div class="max-w-lg">
+  {% if saved %}
+  <div class="mb-4 px-4 py-3 rounded-xl border text-sm flex items-center gap-2"
+       style="background:rgba(16,185,129,0.08); border-color:rgba(16,185,129,0.3); color:#10b981;">
+    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+    设置已保存
+  </div>
+  {% endif %}
+
+  <div class="rounded-2xl border p-5" style="background:var(--color-card); border-color:var(--color-border);">
+    <form method="post" action="/admin/settings" class="space-y-4">
+      <div>
+        <label class="form-label">网站名称</label>
+        <input name="site_name" type="text" value="{{ settings.get('site_name','VideoHub Pro') }}" class="form-input">
+      </div>
+      <div>
+        <label class="form-label">网站描述</label>
+        <textarea name="site_description" rows="2" class="form-input resize-none">{{ settings.get('site_description','') }}</textarea>
+      </div>
+      <div>
+        <label class="form-label">SEO 关键词 <span class="font-normal" style="color:var(--color-muted);">（逗号分隔）</span></label>
+        <input name="site_keywords" type="text" value="{{ settings.get('site_keywords','') }}" class="form-input" placeholder="视频,博客,教程">
+      </div>
+      <div>
+        <label class="form-label">底部版权文字</label>
+        <input name="footer_text" type="text" value="{{ settings.get('footer_text','') }}" class="form-input">
+      </div>
+      <div class="pt-1">
+        <button type="submit" class="px-6 py-2.5 rounded-xl text-sm font-semibold text-white bg-grad-primary hover:opacity-90 transition-opacity">保存设置</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="rounded-2xl border p-5 mt-4" style="background:var(--color-card); border-color:var(--color-border);">
+    <h3 class="font-semibold text-sm mb-3" style="color:var(--color-text);">开发者工具</h3>
+    <div class="space-y-2 text-sm">
+      <div class="flex justify-between py-2 border-b" style="border-color:var(--color-border);">
+        <span style="color:var(--color-muted);">API 文档</span>
+        <a href="/docs" target="_blank" class="text-primary-500 hover:underline text-xs">/docs ↗</a>
+      </div>
+      <div class="flex justify-between py-2">
+        <span style="color:var(--color-muted);">健康检查</span>
+        <a href="/health" target="_blank" class="text-primary-500 hover:underline text-xs">/health ↗</a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}所有分类{% endblock %}
+
+{% block content %}
+<div class="bg-gradient-to-br from-blue-600 to-purple-700 text-white py-14">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+    <h1 class="text-3xl md:text-4xl font-bold mb-2">视频分类</h1>
+    <p class="text-blue-200">浏览所有分类，发现感兴趣的内容</p>
+  </div>
+</div>
+
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+    {% for item in cat_data %}
+    <a href="/category/{{ item.category.slug }}"
+       class="group relative overflow-hidden bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 hover:shadow-xl hover:border-blue-200 dark:hover:border-purple-700 transition-all duration-300">
+      <!-- 封面图 -->
+      <div class="h-44 overflow-hidden bg-gray-200 dark:bg-gray-700">
+        {% if item.preview and item.preview.cover_url %}
+        <img src="{{ item.preview.cover_url }}" loading="lazy"
+             class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" alt="{{ item.category.name }}">
+        {% else %}
+        <div class="w-full h-full bg-gradient-to-br from-blue-400 to-purple-600 flex items-center justify-center">
+          <svg class="w-12 h-12 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 10l4.553-2.069A1 1 0 0121 8.82v6.361a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"/></svg>
+        </div>
+        {% endif %}
+        <div class="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
+      </div>
+      <!-- 信息 -->
+      <div class="absolute bottom-0 left-0 right-0 p-5">
+        <h3 class="text-white font-bold text-lg">{{ item.category.name }}</h3>
+        <p class="text-white/70 text-sm mt-1">{{ item.count }} 个视频</p>
+        {% if item.category.description %}
+        <p class="text-white/60 text-xs mt-1 line-clamp-1">{{ item.category.description }}</p>
+        {% endif %}
+      </div>
+      <!-- 悬浮箭头 -->
+      <div class="absolute top-4 right-4 w-8 h-8 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+        <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+      </div>
+    </a>
+    {% else %}
+    <div class="col-span-full text-center py-16 text-gray-400">暂无分类</div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

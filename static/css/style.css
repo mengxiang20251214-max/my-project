@@ -1,0 +1,167 @@
+/* ═══════════════════════════════════════════════════════════════
+   VideoHub Pro v3 — 紫蓝主题样式
+   Primary:   #6366f1 (Indigo-500)
+   Secondary: #3b82f6 (Blue-500)
+   Gradient:  linear-gradient(135deg, #6366f1, #3b82f6)
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── CSS 变量（亮色模式） ─────────────────────────────────────── */
+:root {
+  --color-bg:       #f8fafc;
+  --color-card:     #ffffff;
+  --color-border:   #e2e8f0;
+  --color-text:     #1e293b;
+  --color-muted:    #64748b;
+  --color-input:    #f1f5f9;
+  --color-primary:  #6366f1;
+  --color-secondary:#3b82f6;
+  --grad-primary:   linear-gradient(135deg, #6366f1 0%, #3b82f6 100%);
+  --shadow-sm:      0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-hover:   0 8px 24px rgba(99,102,241,0.15), 0 2px 8px rgba(0,0,0,0.06);
+}
+
+/* ── 暗色模式变量 ─────────────────────────────────────────────── */
+.dark {
+  --color-bg:       #0f172a;
+  --color-card:     #1e293b;
+  --color-border:   #334155;
+  --color-text:     #f1f5f9;
+  --color-muted:    #94a3b8;
+  --color-input:    #0f172a;
+  --color-primary:  #818cf8;
+  --color-secondary:#60a5fa;
+  --shadow-sm:      0 1px 3px rgba(0,0,0,0.3);
+  --shadow-hover:   0 8px 24px rgba(129,140,248,0.2), 0 2px 8px rgba(0,0,0,0.2);
+}
+
+/* ── 全局 ─────────────────────────────────────────────────────── */
+html { scroll-behavior: smooth; }
+body { color: var(--color-text); transition: background-color .3s, color .3s; }
+
+/* 自定义滚动条 */
+::-webkit-scrollbar { width:5px; height:5px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:var(--color-border); border-radius:999px; }
+::-webkit-scrollbar-thumb:hover { background:var(--color-primary); }
+::selection { background:rgba(99,102,241,0.2); }
+
+/* 渐变文字 */
+.text-gradient {
+  background: var(--grad-primary);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* 多行截断 */
+.line-clamp-1 { display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical; overflow:hidden; }
+.line-clamp-2 { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+
+/* ── 通用按钮 ─────────────────────────────────────────────────── */
+.icon-btn {
+  display:inline-flex; align-items:center; justify-content:center;
+  width:32px; height:32px; border-radius:8px;
+  color:var(--color-muted); transition:background .15s, color .15s;
+}
+.icon-btn:hover { background:var(--color-input); color:var(--color-text); }
+
+.nav-link {
+  font-size:.8125rem; font-weight:500; color:var(--color-muted);
+  padding:.25rem .5rem; border-radius:.5rem;
+  transition:color .15s, background .15s;
+}
+.nav-link:hover { color:var(--color-primary); background:rgba(99,102,241,0.08); }
+
+/* ── 筛选芯片 ─────────────────────────────────────────────────── */
+.filter-chip {
+  display:inline-flex; align-items:center;
+  padding:.3rem .875rem; border-radius:999px;
+  font-size:.8125rem; font-weight:500;
+  border:1px solid var(--color-border); color:var(--color-muted);
+  background:var(--color-card); transition:all .15s; white-space:nowrap;
+}
+.filter-chip:hover { border-color:var(--color-primary); color:var(--color-primary); }
+.filter-chip-active { background:var(--grad-primary); border-color:transparent; color:#fff; }
+.filter-chip-active:hover { opacity:.9; color:#fff; }
+
+/* ── 分页按钮 ─────────────────────────────────────────────────── */
+.pagination-btn {
+  display:inline-flex; align-items:center;
+  padding:.375rem .875rem; border-radius:.625rem; font-size:.8125rem;
+  border:1px solid var(--color-border); color:var(--color-muted);
+  background:var(--color-card); transition:all .15s;
+}
+.pagination-btn:hover { border-color:var(--color-primary); color:var(--color-primary); }
+.pagination-active { background:var(--grad-primary); border-color:transparent; color:#fff; }
+
+/* ── 视频卡片 ─────────────────────────────────────────────────── */
+.video-card {
+  box-shadow:var(--shadow-sm);
+  transition:transform .2s ease, box-shadow .2s ease;
+}
+.video-card:hover { transform:translateY(-2px); box-shadow:var(--shadow-hover); }
+
+/* ── 管理后台表单 ─────────────────────────────────────────────── */
+.form-label {
+  display:block; font-size:.75rem; font-weight:500;
+  color:var(--color-muted); margin-bottom:.375rem;
+}
+.form-input {
+  width:100%; padding:.5rem .875rem; border-radius:.75rem;
+  border:1px solid var(--color-border); background:var(--color-input);
+  color:var(--color-text); font-size:.875rem;
+  transition:border-color .15s, box-shadow .15s;
+}
+.form-input:focus { outline:none; border-color:var(--color-primary); box-shadow:0 0 0 3px rgba(99,102,241,.15); }
+select.form-input { cursor:pointer; }
+
+.admin-btn-sm {
+  display:inline-flex; align-items:center; justify-content:center;
+  padding:.25rem .75rem; border-radius:.5rem; font-size:.75rem; font-weight:500;
+  border:1px solid currentColor; opacity:.75; transition:opacity .15s, background .15s;
+  white-space:nowrap;
+}
+.admin-btn-sm:hover { opacity:1; }
+
+/* ── Banner / Swiper 自定义 ───────────────────────────────────── */
+.banner-wrap-top { user-select:none; }
+
+/* 顶部 Banner 按钮缩小 */
+.banner-top .swiper-button-prev,
+.banner-top .swiper-button-next {
+  width:32px !important; height:32px !important;
+  background:rgba(255,255,255,0.15);
+  border-radius:50%; backdrop-filter:blur(4px);
+}
+.banner-top .swiper-button-prev::after,
+.banner-top .swiper-button-next::after { font-size:12px !important; color:#fff; }
+
+.banner-top .swiper-pagination-bullet { background:rgba(255,255,255,0.6) !important; }
+.banner-top .swiper-pagination-bullet-active {
+  background:#fff !important; width:20px !important; border-radius:4px !important;
+}
+
+/* 侧边 Banner 分页点 */
+.banner-left .swiper-pagination,
+.banner-right .swiper-pagination { bottom:8px !important; }
+.banner-left .swiper-pagination-bullet,
+.banner-right .swiper-pagination-bullet { background:rgba(99,102,241,0.4) !important; }
+.banner-left .swiper-pagination-bullet-active,
+.banner-right .swiper-pagination-bullet-active { background:#6366f1 !important; width:16px !important; border-radius:4px !important; }
+
+/* ── Plyr 播放器 ──────────────────────────────────────────────── */
+.plyr__control--overlaid { background:var(--grad-primary) !important; }
+.plyr__control--overlaid:hover { opacity:.9 !important; transform:scale(1.08); }
+.plyr--video .plyr__controls { background:linear-gradient(to top, rgba(0,0,0,.7), transparent); }
+
+/* ── 页面过渡动画 ─────────────────────────────────────────────── */
+@keyframes fadeUp { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+main { animation:fadeUp .3s ease-out; }
+
+/* ── 上传 loading spinner ─────────────────────────────────────── */
+@keyframes spin { to { transform:rotate(360deg); } }
+.animate-spin { animation:spin .8s linear infinite; }
+
+/* ── 响应式图片 ───────────────────────────────────────────────── */
+img { max-width:100%; height:auto; }
+img[loading="lazy"] { content-visibility:auto; }

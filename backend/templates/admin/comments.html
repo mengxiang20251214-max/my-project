@@ -1,0 +1,69 @@
+{% extends "admin/base.html" %}
+{% block title %}评论管理{% endblock %}
+{% block page_title %}评论管理{% endblock %}
+
+{% block content %}
+<div class="mb-4 flex items-center justify-between">
+  <p class="text-sm text-gray-400">共 {{ total }} 条评论</p>
+</div>
+
+<div class="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-left text-xs text-gray-400 bg-gray-50 dark:bg-gray-700/50 border-b border-gray-100 dark:border-gray-700">
+          <th class="px-4 py-3 font-medium w-12">ID</th>
+          <th class="px-4 py-3 font-medium w-28">昵称</th>
+          <th class="px-4 py-3 font-medium">评论内容</th>
+          <th class="px-4 py-3 font-medium hidden md:table-cell">所属视频</th>
+          <th class="px-4 py-3 font-medium w-36 hidden sm:table-cell">时间</th>
+          <th class="px-4 py-3 font-medium w-20 text-right">操作</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-50 dark:divide-gray-700/50">
+        {% for c in comments %}
+        <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors" x-data="{confirm:false}">
+          <td class="px-4 py-3 text-gray-400">{{ c.id }}</td>
+          <td class="px-4 py-3 font-medium">{{ c.nickname }}</td>
+          <td class="px-4 py-3 text-gray-600 dark:text-gray-300">
+            <p class="line-clamp-2 max-w-xs">{{ c.content }}</p>
+          </td>
+          <td class="px-4 py-3 hidden md:table-cell">
+            {% if c.video %}
+            <a href="/video/{{ c.video_id }}" target="_blank" class="text-blue-600 dark:text-purple-400 hover:underline text-xs line-clamp-1">{{ c.video.title[:30] }}…</a>
+            {% else %}
+            <span class="text-gray-400 text-xs">视频已删除</span>
+            {% endif %}
+          </td>
+          <td class="px-4 py-3 text-gray-400 text-xs hidden sm:table-cell">{{ c.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+          <td class="px-4 py-3">
+            <div class="flex justify-end">
+              <button @click="confirm=!confirm" class="px-3 py-1 rounded-lg bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 text-xs font-medium hover:bg-red-200 transition-colors">删除</button>
+            </div>
+            <div x-show="confirm" x-transition class="mt-2 p-2 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800">
+              <p class="text-xs text-red-600 mb-2">确认删除？</p>
+              <div class="flex gap-2">
+                <form method="post" action="/admin/comments/{{ c.id }}/delete">
+                  <button type="submit" class="px-3 py-1 bg-red-500 text-white rounded text-xs">确认</button>
+                </form>
+                <button @click="confirm=false" class="px-3 py-1 bg-gray-200 dark:bg-gray-700 rounded text-xs">取消</button>
+              </div>
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="px-4 py-10 text-center text-gray-400">暂无评论</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% if pages > 1 %}
+<div class="flex justify-center gap-2 mt-5">
+  {% if page > 1 %}<a href="/admin/comments?page={{ page-1 }}" class="px-4 py-2 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-sm">上一页</a>{% endif %}
+  <span class="px-4 py-2 text-sm text-gray-500">{{ page }} / {{ pages }}</span>
+  {% if page < pages %}<a href="/admin/comments?page={{ page+1 }}" class="px-4 py-2 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-sm">下一页</a>{% endif %}
+</div>
+{% endif %}
+{% endblock %}

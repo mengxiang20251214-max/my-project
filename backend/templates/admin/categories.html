@@ -1,0 +1,52 @@
+{% extends "admin/base.html" %}
+{% block title %}分类管理{% endblock %}
+{% block page_title %}分类管理{% endblock %}
+
+{% block content %}
+<div class="max-w-lg">
+  <!-- 添加表单 -->
+  <div class="rounded-2xl border p-5 mb-5" style="background:var(--color-card); border-color:var(--color-border);">
+    <h3 class="font-semibold text-sm mb-4" style="color:var(--color-text);">新建分类</h3>
+    <form method="post" action="/admin/categories/add" class="flex gap-2">
+      <input name="name" type="text" required placeholder="分类名称（中英文均可）"
+        class="flex-1 form-input">
+      <button type="submit" class="px-5 py-2 rounded-xl text-sm font-semibold text-white bg-grad-primary hover:opacity-90 transition-opacity shrink-0">添加</button>
+    </form>
+  </div>
+
+  <!-- 分类列表 -->
+  <div class="rounded-2xl border overflow-hidden" style="background:var(--color-card); border-color:var(--color-border);">
+    <div class="px-5 py-3 border-b text-xs font-medium grid grid-cols-3 gap-3" style="border-color:var(--color-border); color:var(--color-muted);">
+      <span>分类名称</span>
+      <span class="text-center">视频数量</span>
+      <span class="text-right">操作</span>
+    </div>
+    <div class="divide-y" style="border-color:var(--color-border);">
+      {% for cat in categories %}
+      <div class="px-5 py-3 grid grid-cols-3 gap-3 items-center hover:bg-primary-50/20 dark:hover:bg-primary-900/10 transition-colors" x-data="{del:false}">
+        <div>
+          <p class="text-sm font-medium" style="color:var(--color-text);">{{ cat.name }}</p>
+          <p class="text-xs" style="color:var(--color-muted);">/{{ cat.slug }}</p>
+        </div>
+        <p class="text-center text-sm font-semibold" style="color:var(--color-text);">{{ cat_counts.get(cat.id, 0) }}</p>
+        <div class="flex justify-end">
+          <button @click="del=!del" class="admin-btn-sm" style="color:#ef4444;">删除</button>
+        </div>
+        <!-- 删除确认 -->
+        <div x-show="del" x-transition class="col-span-3 p-3 rounded-xl border" style="background:rgba(239,68,68,0.06); border-color:rgba(239,68,68,0.2);">
+          <p class="text-xs mb-2" style="color:#ef4444;">删除「{{ cat.name }}」？该分类下 {{ cat_counts.get(cat.id,0) }} 个视频将变为无分类。</p>
+          <div class="flex gap-2">
+            <form method="post" action="/admin/categories/{{ cat.id }}/delete">
+              <button type="submit" class="px-3 py-1 rounded-lg text-xs text-white bg-red-500">确认删除</button>
+            </form>
+            <button @click="del=false" class="px-3 py-1 rounded-lg text-xs border" style="border-color:var(--color-border);">取消</button>
+          </div>
+        </div>
+      </div>
+      {% else %}
+      <div class="px-5 py-10 text-center text-sm" style="color:var(--color-muted);">暂无分类</div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}

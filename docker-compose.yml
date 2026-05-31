@@ -1,0 +1,22 @@
+version: "3.9"
+
+services:
+  web:
+    build: .
+    container_name: blog-video-pro
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./static/uploads:/app/static/uploads
+      - ./blog_video.db:/app/backend/blog_video.db
+    environment:
+      - SECRET_KEY=${SECRET_KEY:-change-this-in-production}
+      - DATABASE_URL=sqlite:///./blog_video.db
+      - SITE_NAME=${SITE_NAME:-VideoHub Pro}
+      - DEBUG=${DEBUG:-False}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

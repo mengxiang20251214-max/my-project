@@ -1,0 +1,79 @@
+{% extends "admin/base.html" %}
+{% block title %}用户管理{% endblock %}
+{% block page_title %}用户管理{% endblock %}
+
+{% block content %}
+<div class="mb-4 flex items-center justify-between">
+  <p class="text-sm text-gray-400">共 {{ total }} 名用户</p>
+</div>
+
+<div class="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-left text-xs text-gray-400 bg-gray-50 dark:bg-gray-700/50 border-b border-gray-100 dark:border-gray-700">
+          <th class="px-4 py-3 font-medium w-12">ID</th>
+          <th class="px-4 py-3 font-medium">用户</th>
+          <th class="px-4 py-3 font-medium hidden sm:table-cell">邮箱</th>
+          <th class="px-4 py-3 font-medium w-20">角色</th>
+          <th class="px-4 py-3 font-medium w-20">状态</th>
+          <th class="px-4 py-3 font-medium w-32 hidden md:table-cell">注册时间</th>
+          <th class="px-4 py-3 font-medium w-28 text-right">操作</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-50 dark:divide-gray-700/50">
+        {% for u in users %}
+        <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
+          <td class="px-4 py-3 text-gray-400">{{ u.id }}</td>
+          <td class="px-4 py-3">
+            <div class="flex items-center gap-3">
+              <img src="{{ u.avatar or 'https://api.dicebear.com/7.x/avataaars/svg?seed='~u.username }}"
+                   class="w-8 h-8 rounded-full object-cover shrink-0" alt="">
+              <span class="font-medium">{{ u.username }}</span>
+            </div>
+          </td>
+          <td class="px-4 py-3 text-gray-500 hidden sm:table-cell text-xs">{{ u.email }}</td>
+          <td class="px-4 py-3">
+            <span class="px-2.5 py-1 rounded-full text-xs font-medium
+              {% if u.role=='admin' %}bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400{% else %}bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300{% endif %}">
+              {% if u.role=='admin' %}管理员{% else %}普通用户{% endif %}
+            </span>
+          </td>
+          <td class="px-4 py-3">
+            <span class="px-2.5 py-1 rounded-full text-xs font-medium
+              {% if u.is_active %}bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400{% else %}bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400{% endif %}">
+              {% if u.is_active %}正常{% else %}已封禁{% endif %}
+            </span>
+          </td>
+          <td class="px-4 py-3 text-gray-400 text-xs hidden md:table-cell">{{ u.created_at.strftime('%Y-%m-%d') }}</td>
+          <td class="px-4 py-3">
+            {% if u.id != current_user.id %}
+            <div class="flex justify-end gap-1">
+              <form method="post" action="/admin/users/{{ u.id }}/toggle" class="inline">
+                <button type="submit" class="px-3 py-1 rounded-lg text-xs font-medium transition-colors
+                  {% if u.is_active %}bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 hover:bg-orange-200{% else %}bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 hover:bg-green-200{% endif %}">
+                  {% if u.is_active %}封禁{% else %}解封{% endif %}
+                </button>
+              </form>
+            </div>
+            {% else %}
+            <span class="text-xs text-gray-400 px-3">（当前账号）</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="px-4 py-10 text-center text-gray-400">暂无用户</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% if pages > 1 %}
+<div class="flex justify-center gap-2 mt-5">
+  {% if page > 1 %}<a href="/admin/users?page={{ page-1 }}" class="px-4 py-2 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-sm">上一页</a>{% endif %}
+  <span class="px-4 py-2 text-sm text-gray-500">{{ page }} / {{ pages }}</span>
+  {% if page < pages %}<a href="/admin/users?page={{ page+1 }}" class="px-4 py-2 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-sm">下一页</a>{% endif %}
+</div>
+{% endif %}
+{% endblock %}

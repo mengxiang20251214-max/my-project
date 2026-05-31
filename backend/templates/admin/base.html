@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN"
+  x-data="{ darkMode: localStorage.getItem('darkMode')==='true', sidebar: true }"
+  :class="{ 'dark': darkMode }"
+  x-init="$watch('darkMode', v => localStorage.setItem('darkMode', v))">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}管理后台{% endblock %} · {{ site_name }}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          backgroundImage: { 'grad-primary': 'linear-gradient(135deg, #6366f1 0%, #3b82f6 100%)' }
+        }
+      }
+    }
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+
+<body class="min-h-screen flex" style="background:var(--color-bg);">
+
+<!-- ═══ 侧边栏 ═══ -->
+<aside :class="sidebar ? 'w-56' : 'w-14'" class="shrink-0 flex flex-col transition-all duration-300 z-30"
+  style="background:#1a1235; color:#fff; min-height:100vh;">
+  <div class="flex items-center gap-3 px-4 py-4 border-b border-white/10 shrink-0">
+    <div class="shrink-0 w-7 h-7 rounded-lg bg-grad-primary flex items-center justify-center shadow">
+      <svg class="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
+        <path d="M2 6a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6zm12.553 1.106A1 1 0 0014 8v4a1 1 0 00.553.894l2 1A1 1 0 0018 13V7a1 1 0 00-1.447-.894l-2 1z"/>
+      </svg>
+    </div>
+    <span x-show="sidebar" class="font-bold text-sm truncate">管理后台</span>
+  </div>
+
+  <nav class="flex-1 px-2 py-4 space-y-0.5 overflow-y-auto">
+    {% set nav = [
+      ('/admin/dashboard',  'M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z', '仪表盘'),
+      ('/admin/videos',     'M15 10l4.553-2.069A1 1 0 0121 8.82v6.361a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z', '视频管理'),
+      ('/admin/categories', 'M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z', '分类管理'),
+      ('/admin/banners',    'M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zm0 8a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zm12 0a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z', 'Banner 管理'),
+      ('/admin/settings',   'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z', '系统设置'),
+    ] %}
+    {% for href, icon, label in nav %}
+    <a href="{{ href }}"
+       class="flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all
+         {% if request.url.path.startswith(href) %}text-white{% else %}text-white/50 hover:text-white/90 hover:bg-white/5{% endif %}"
+       {% if request.url.path.startswith(href) %}style="background:rgba(99,102,241,0.25);"{% endif %}>
+      <svg class="shrink-0 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ icon }}"/>
+      </svg>
+      <span x-show="sidebar" class="truncate">{{ label }}</span>
+    </a>
+    {% endfor %}
+  </nav>
+
+  <div class="p-2 border-t border-white/10 space-y-0.5">
+    <a href="/" target="_blank" class="flex items-center gap-3 px-3 py-2 rounded-xl text-white/50 hover:text-white/90 hover:bg-white/5 transition-all text-sm">
+      <svg class="shrink-0 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+      <span x-show="sidebar" class="text-sm">前台预览</span>
+    </a>
+    <a href="/logout" class="flex items-center gap-3 px-3 py-2 rounded-xl text-red-400/70 hover:text-red-400 hover:bg-red-500/10 transition-all text-sm">
+      <svg class="shrink-0 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+      <span x-show="sidebar" class="text-sm">退出</span>
+    </a>
+  </div>
+</aside>
+
+<!-- ═══ 主区域 ═══ -->
+<div class="flex-1 flex flex-col overflow-hidden min-w-0">
+  <header class="h-14 flex items-center justify-between px-5 border-b shrink-0"
+    style="background:var(--color-card); border-color:var(--color-border);">
+    <div class="flex items-center gap-3">
+      <button @click="sidebar=!sidebar" class="icon-btn">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
+      <span class="text-sm font-semibold" style="color:var(--color-text);">{% block page_title %}{% endblock %}</span>
+    </div>
+    <div class="flex items-center gap-3">
+      <button @click="darkMode=!darkMode" class="icon-btn">
+        <svg x-show="!darkMode" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
+        <svg x-show="darkMode" class="w-4 h-4 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+      </button>
+      <span class="text-sm font-medium" style="color:var(--color-muted);">{{ current_user.username }}</span>
+    </div>
+  </header>
+  <main class="flex-1 overflow-y-auto p-5">
+    {% block content %}{% endblock %}
+  </main>
+</div>
+
+<script src="/static/js/main.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>
