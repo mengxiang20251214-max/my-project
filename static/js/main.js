@@ -59,29 +59,39 @@ function initBannerSwiper(selector, opts = {}) {
 const VALID_LANGS = ['zh', 'en', 'id'];
 
 /**
- * 切换界面语言：写入 localStorage 和 cookie，然后刷新页面让服务端重渲染。
+ * 读取 document.cookie 中 lang 字段的值。
+ * 只读浏览器本地 cookie，不依赖服务端渲染的 HTML 属性。
+ */
+function _getCookieLang() {
+  const m = document.cookie.match(/(?:^|;\s*)lang=([^;]+)/);
+  return m ? m[1] : '';
+}
+
+/**
+ * 切换界面语言：写入 localStorage + cookie，刷新页面让服务端重渲染。
  * @param {string} lang  'zh' | 'en' | 'id'
  */
 function setLang(lang) {
   if (!VALID_LANGS.includes(lang)) return;
   localStorage.setItem('lang', lang);
-  document.cookie = `lang=${lang};path=/;max-age=31536000;samesite=lax`;
+  document.cookie = 'lang=' + lang + ';path=/;max-age=31536000;samesite=lax';
   location.reload();
 }
 
-// ── DOM 就绪初始化 ──────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
-  // 同步 localStorage 语言偏好 → cookie，若与当前页不符则重载
-  const storedLang = localStorage.getItem('lang');
-  if (storedLang && VALID_LANGS.includes(storedLang)) {
-    const currentLang = document.documentElement.lang || 'zh';
-    if (storedLang !== currentLang) {
-      document.cookie = `lang=${storedLang};path=/;max-age=31536000;samesite=lax`;
-      location.reload();
-      return;
-    }
+// ── 启动时语言同步（对比 localStorage 与浏览器 cookie，不对比 HTML 属性） ────────
+// 原理：设完 cookie 立刻 reload 后，下次 _getCookieLang() 返回的值和 localStorage 相同，
+//      条件永远为 false → 绝对不会第二次 reload，彻底消灭死循环。
+(function syncLangOnce() {
+  var saved = localStorage.getItem('lang');
+  if (!saved || VALID_LANGS.indexOf(saved) === -1) return; // 没有偏好，不处理
+  if (saved !== _getCookieLang()) {
+    document.cookie = 'lang=' + saved + ';path=/;max-age=31536000;samesite=lax';
+    location.reload();
   }
+}());
 
+// ── DOM 就绪初始化 ──────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', function () {
   fixExternalLinks();
   fixBrokenImages();
 });
