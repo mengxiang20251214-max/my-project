@@ -30,19 +30,19 @@ def banner_media_type_for(ext: str) -> str:
     return "image"
 
 
-async def save_banner_file(file, banners_dir: str) -> tuple[str, str]:
+async def save_banner_file(file, temp_dir: str) -> tuple[str, str, str]:
     """
-    异步流式保存上传的 Banner 文件（图片/GIF/视频）到 banners_dir。
+    异步流式把上传的 Banner 文件（图片/GIF/视频）写到临时目录，交给存储层落库。
 
-    Banner 现在允许任意大小的图/GIF/视频，所以用 aiofiles 分块写入，
-    避免把整个文件读进内存、也不阻塞事件循环（大视频上传时尤其重要）。
+    Banner 允许任意大小，所以用 aiofiles 分块写入，避免整文件读进内存、
+    也不阻塞事件循环。落库（本地 move / R2 上传）由调用方的 STORAGE 完成。
 
     Args:
-        file:        FastAPI UploadFile
-        banners_dir: 保存目录绝对路径（自动创建）
+        file:     FastAPI UploadFile
+        temp_dir: 临时目录（STORAGE.temp_dir）
 
     Returns:
-        (相对 URL, media_type)，如 ("/static/uploads/banners/xxx.mp4", "video")
+        (临时文件绝对路径, media_type, 扩展名)，如 ("/.../xxx.mp4", "video", ".mp4")
 
     Raises:
         ValueError: 扩展名不被允许
@@ -50,9 +50,8 @@ async def save_banner_file(file, banners_dir: str) -> tuple[str, str]:
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in BANNER_ALLOWED_EXT:
         raise ValueError(f"不支持的 Banner 文件类型: {ext or '未知'}")
-    os.makedirs(banners_dir, exist_ok=True)
-    filename = f"{uuid.uuid4().hex}{ext}"
-    dest = os.path.abspath(os.path.join(banners_dir, filename))
+    os.makedirs(temp_dir, exist_ok=True)
+    dest = os.path.abspath(os.path.join(temp_dir, f"{uuid.uuid4().hex}{ext}"))
     try:
         await file.seek(0)
         async with aiofiles.open(dest, "wb") as out:
@@ -62,7 +61,7 @@ async def save_banner_file(file, banners_dir: str) -> tuple[str, str]:
         if os.path.exists(dest):
             os.remove(dest)
         raise
-    return f"/static/uploads/banners/{filename}", banner_media_type_for(ext)
+    return dest, banner_media_type_for(ext), ext
 
 
 def extract_cover(video_abs: str, covers_dir: str, stem: str) -> Optional[str]:
@@ -76,11 +75,12 @@ def extract_cover(video_abs: str, covers_dir: str, stem: str) -> Optional[str]:
 
     Args:
         video_abs:  视频文件绝对路径
-        covers_dir: 封面保存目录（绝对路径，自动创建）
+        covers_dir: 封面输出目录（绝对路径，自动创建）
         stem:       文件名主干，封面命名为 {stem}_cover.jpg
 
     Returns:
-        封面的 URL 相对路径（如 /static/uploads/covers/abc_cover.jpg），或 None
+        生成的封面 **本地文件绝对路径**（由调用方交给存储层落库），或 None。
+        （注意：不再返回 URL —— URL 由 storage 决定，本地/R2 不同）
     """
     ffmpeg_bin = shutil.which("ffmpeg") or shutil.which("ffmpeg.exe")
     if not ffmpeg_bin:
@@ -127,12 +127,12 @@ def extract_cover(video_abs: str, covers_dir: str, stem: str) -> Optional[str]:
     # 第一次尝试：第 2 秒
     if _run(["-ss", "00:00:02"]):
         logger.debug("封面提取成功（第 2 秒）: %s", cover_abs)
-        return f"/static/uploads/covers/{cover_name}"
+        return cover_abs
 
     # 回退：第 0 帧（短视频 / 纯音频等边缘情况）
     if _run([]):
         logger.debug("封面提取成功（第 0 帧）: %s", cover_abs)
-        return f"/static/uploads/covers/{cover_name}"
+        return cover_abs
 
     logger.warning("ffmpeg 封面提取失败，视频: %s", video_abs)
     return None

@@ -20,6 +20,7 @@ from .models import Video, Category, User, Banner, SiteSetting, Country, VideoTy
 from .auth import (get_current_user, require_admin,
                    verify_password, get_password_hash, create_access_token)
 from .utils import extract_cover, save_banner_file, BANNER_ALLOWED_EXT
+from .storage import STORAGE
 from .api import videos as videos_router
 from .api import categories as categories_router
 from .api import users as users_router
@@ -242,37 +243,41 @@ def _seed_taxonomy(db: Session):
     db.commit()
 
 
-# ── 文件上传工具 ──────────────────────────────────────────────────────────────
+# ── 文件上传工具（统一走 storage：本地磁盘 / R2）────────────────────────────────
 async def _save_video_file(file: UploadFile) -> tuple[str, int, str]:
-    """流式保存视频文件，返回 (相对URL, 字节数, 绝对路径)。"""
+    """流式保存视频：先落到 STORAGE.temp_dir，再 persist 到存储。
+
+    返回 (公开URL, 字节数, 本地可读路径)。本地路径供 ffmpeg 抽封面，
+    用完后调用方需 STORAGE.release(local) 释放（本地存储 no-op，R2 删临时文件）。
+    """
     ext = os.path.splitext(file.filename or "video")[1].lower() or ".mp4"
     if ext not in ALLOWED_VIDEO_EXT:
         ext = ".mp4"
-    stem = uuid.uuid4().hex
-    filename = f"{stem}{ext}"
-    videos_dir = os.path.join(UPLOAD_DIR, "videos")
-    os.makedirs(videos_dir, exist_ok=True)
-    dest = os.path.abspath(os.path.join(videos_dir, filename))
+    name = f"{uuid.uuid4().hex}{ext}"
+    tmp = os.path.abspath(os.path.join(STORAGE.temp_dir, name))
+    os.makedirs(STORAGE.temp_dir, exist_ok=True)
     size = 0
     try:
-        async with aiofiles.open(dest, "wb") as f:
+        async with aiofiles.open(tmp, "wb") as f:
             while chunk := await file.read(CHUNK_SIZE):
                 await f.write(chunk)
                 size += len(chunk)
     except Exception as exc:
         logger.exception("保存视频文件失败: %s", exc)
-        if os.path.exists(dest):
-            os.remove(dest)
+        if os.path.exists(tmp):
+            os.remove(tmp)
         raise
-    return f"/static/uploads/videos/{filename}", size, dest
+    url, local = STORAGE.persist(tmp, f"videos/{name}", "video/mp4")
+    return url, size, local
 
 
-def _video_abs_path(video_file: Optional[str]) -> Optional[str]:
-    """把 /static/uploads/videos/xxx.mp4 转成磁盘绝对路径；非本地文件返回 None。"""
-    if not video_file or not video_file.startswith("/static/"):
+def _make_cover(video_local: str) -> Optional[str]:
+    """从本地视频文件抽一帧封面，落库到存储，返回封面公开 URL（失败返回 None）。"""
+    stem = os.path.splitext(os.path.basename(video_local))[0]
+    jpg = extract_cover(video_local, STORAGE.temp_dir, stem)
+    if not jpg:
         return None
-    p = os.path.abspath(os.path.join(BASE_DIR, "..", video_file.lstrip("/")))
-    return p if os.path.isfile(p) else None
+    return STORAGE.save_file(jpg, f"covers/{os.path.basename(jpg)}", "image/jpeg")
 
 
 def _needs_cover(v: Video) -> bool:
@@ -283,25 +288,38 @@ def _needs_cover(v: Video) -> bool:
     return (not c) or ("picsum.photos" in c)
 
 
-def _extract_cover_bg(video_id: int) -> None:
-    """后台任务：为单个上传视频提取封面并写回 DB（独立 session，不依赖请求生命周期）。"""
+def _cover_bg(video_id: int, video_local: Optional[str] = None) -> None:
+    """后台任务：为上传视频提取封面并写回 DB（独立 session）。
+
+    video_local 来自 persist（批量上传时直接复用，省一次下载）；
+    为 None 时（补全场景）通过 STORAGE.fetch_local 按 URL 取本地副本。
+    """
     db = SessionLocal()
+    fetched_temp = None
     try:
         v = db.query(Video).filter(Video.id == video_id).first()
-        if not v:
+        if not v or not v.video_file:
             return
-        abs_path = _video_abs_path(v.video_file)
-        if not abs_path:
-            return
-        stem = os.path.splitext(os.path.basename(abs_path))[0]
-        cover = extract_cover(abs_path, os.path.join(UPLOAD_DIR, "covers"), stem)
-        if cover:
-            v.cover_url = cover
+        path = video_local
+        if path is None:
+            got = STORAGE.fetch_local(v.video_file)
+            if not got:
+                return
+            path, is_temp = got
+            if is_temp:
+                fetched_temp = path
+        url = _make_cover(path)
+        if url:
+            v.cover_url = url
             db.commit()
-            logger.info("封面已生成 video_id=%s -> %s", video_id, cover)
+            logger.info("封面已生成 video_id=%s -> %s", video_id, url)
     except Exception as exc:
         logger.exception("后台封面提取失败 video_id=%s: %s", video_id, exc)
     finally:
+        if video_local is not None:
+            STORAGE.release(video_local)          # persist 给的本地路径
+        elif fetched_temp and os.path.isfile(fetched_temp):
+            os.remove(fetched_temp)               # fetch_local 下载的临时文件
         db.close()
 
 
@@ -440,14 +458,16 @@ async def admin_add_video(
         if video_type == "upload" and video_file and video_file.filename:
             ext = os.path.splitext(video_file.filename)[1].lower()
             if ext in ALLOWED_VIDEO_EXT:
-                final_file, file_size, video_abs = await _save_video_file(video_file)
+                final_file, file_size, video_local = await _save_video_file(video_file)
                 if not title.strip():
                     title = os.path.splitext(video_file.filename)[0]
-                if not cover_url.strip():
-                    stem = os.path.splitext(os.path.basename(video_abs))[0]
-                    auto = extract_cover(video_abs, os.path.join(UPLOAD_DIR, "covers"), stem)
-                    if auto:
-                        cover_url = auto
+                try:
+                    if not cover_url.strip():
+                        auto = _make_cover(video_local)   # 单个上传：同步抽封面，立即就绪
+                        if auto:
+                            cover_url = auto
+                finally:
+                    STORAGE.release(video_local)
         else:
             final_url = video_url.strip() or None
             if not _is_safe_url(final_url):
@@ -485,7 +505,7 @@ async def admin_batch_upload(
 ):
     cat_id = int(category_id) if (category_id or "").strip().isdigit() else None
     added = []
-    new_videos = []
+    new_videos = []          # (Video, local_path) 供后台抽封面
     try:
         for i, vf in enumerate(video_files):
             if not vf.filename:
@@ -493,21 +513,22 @@ async def admin_batch_upload(
             ext = os.path.splitext(vf.filename)[1].lower()
             if ext not in ALLOWED_VIDEO_EXT:
                 continue
-            fp, fs, va = await _save_video_file(vf)
+            fp, fs, local = await _save_video_file(vf)
             base = os.path.splitext(vf.filename)[0]
             title = f"{title_prefix} {i+1}".strip() if title_prefix else base
             v = Video(title=title, video_file=fp, video_type="upload",
                       cover_url=None, category_id=cat_id,
                       user_id=current_user.id, file_size=fs)
             db.add(v)
-            new_videos.append(v)
+            new_videos.append((v, local))
             added.append(title)
         if added:
             db.commit()
-            # 封面提取改到后台：批量上传立即返回，封面随后逐个生成（避免 N 个文件串行卡住请求）
-            for v in new_videos:
+            # 封面提取改到后台：批量上传立即返回，封面随后逐个生成。
+            # 复用 persist 留下的本地副本（local）省去重新下载；任务结束会 release。
+            for v, local in new_videos:
                 db.refresh(v)
-                background_tasks.add_task(_extract_cover_bg, v.id)
+                background_tasks.add_task(_cover_bg, v.id, local)
         return {"ok": True, "count": len(added), "titles": added}
     except Exception as exc:
         logger.exception("Batch upload failed: %s", exc)
@@ -540,13 +561,18 @@ async def admin_edit_video(
         if video_type == "upload" and video_file and video_file.filename:
             ext = os.path.splitext(video_file.filename)[1].lower()
             if ext in ALLOWED_VIDEO_EXT:
-                v.video_file, v.file_size, va = await _save_video_file(video_file)
+                old_file = v.video_file
+                v.video_file, v.file_size, video_local = await _save_video_file(video_file)
                 v.video_url = None
-                if not v.cover_url:
-                    stem = os.path.splitext(os.path.basename(va))[0]
-                    auto = extract_cover(va, os.path.join(UPLOAD_DIR, "covers"), stem)
-                    if auto:
-                        v.cover_url = auto
+                try:
+                    if not v.cover_url:
+                        auto = _make_cover(video_local)
+                        if auto:
+                            v.cover_url = auto
+                finally:
+                    STORAGE.release(video_local)
+                if old_file:                      # 换了新文件，删掉旧的，避免存储垃圾
+                    STORAGE.delete(old_file)
         elif video_type == "url":
             nu = video_url.strip() or None
             if not _is_safe_url(nu):
@@ -570,10 +596,11 @@ def admin_delete_video(
     v = db.query(Video).filter(Video.id == vid).first()
     if not v:
         raise HTTPException(404, "Video not found")
-    if v.video_file and v.video_file.startswith("/static/"):
-        local = os.path.join(BASE_DIR, "..", v.video_file.lstrip("/"))
-        if os.path.isfile(local):
-            os.remove(local)
+    # 删除存储里的视频文件与自动提取的封面（外链 cover 不归我们管，storage 会忽略）
+    if v.video_file:
+        STORAGE.delete(v.video_file)
+    if v.cover_url:
+        STORAGE.delete(v.cover_url)
     db.delete(v); db.commit()
     return {"ok": True}
 
@@ -585,15 +612,24 @@ def admin_regenerate_cover(
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
-    """为单个「本地上传」视频重新提取封面（同步，立即返回新封面 URL）。"""
+    """为单个「上传」视频重新提取封面（同步，立即返回新封面 URL）。
+
+    本地存储直接读文件；R2 存储会先把视频下载到临时文件再抽帧，用完即删。
+    """
     v = db.query(Video).filter(Video.id == vid).first()
     if not v:
         raise HTTPException(404, "Video not found")
-    abs_path = _video_abs_path(v.video_file)
-    if not abs_path:
-        raise HTTPException(400, "Only locally-uploaded videos support cover extraction")
-    stem = os.path.splitext(os.path.basename(abs_path))[0]
-    cover = extract_cover(abs_path, os.path.join(UPLOAD_DIR, "covers"), stem)
+    if v.video_type != "upload" or not v.video_file:
+        raise HTTPException(400, "Only uploaded videos support cover extraction")
+    got = STORAGE.fetch_local(v.video_file)
+    if not got:
+        raise HTTPException(404, "Video file not found in storage")
+    local, is_temp = got
+    try:
+        cover = _make_cover(local)
+    finally:
+        if is_temp and os.path.isfile(local):
+            os.remove(local)
     if not cover:
         raise HTTPException(
             422, "Cover extraction failed (ffmpeg not installed or video unreadable)")
@@ -612,7 +648,7 @@ def admin_backfill_covers(
     pending = [v.id for v in db.query(Video).filter(Video.video_type == "upload").all()
                if _needs_cover(v)]
     for vid in pending:
-        background_tasks.add_task(_extract_cover_bg, vid)
+        background_tasks.add_task(_cover_bg, vid)   # 无本地副本，任务内按 URL 取
     return {"ok": True, "scheduled": len(pending)}
 
 
@@ -678,7 +714,9 @@ async def _resolve_banner_media(
         ext = os.path.splitext(media_file.filename)[1].lower()
         if ext not in BANNER_ALLOWED_EXT:
             raise HTTPException(400, f"Unsupported banner file type: {ext or 'unknown'}")
-        url, mt = await save_banner_file(media_file, os.path.join(UPLOAD_DIR, "banners"))
+        # 流式落到临时文件 → 交给存储层落库（本地 move / R2 上传）
+        tmp, mt, file_ext = await save_banner_file(media_file, STORAGE.temp_dir)
+        url = STORAGE.save_file(tmp, f"banners/{uuid.uuid4().hex}{file_ext}")
         return url, mt
     url = (image_url or "").strip() or None
     if not _is_safe_url(url):
@@ -739,7 +777,11 @@ async def admin_edit_banner(
         link = link_url.strip() or None
         if not _is_safe_url(link):
             raise HTTPException(400, "Invalid link URL (must start with http://, https:// or /)")
+        old_media = b.image_url
         url, mt = await _resolve_banner_media(media_file, image_url, media_type)
+        # 换了媒体（上传新文件或改了 URL）就删掉旧的存储文件
+        if old_media and old_media != url:
+            STORAGE.delete(old_media)
         b.title      = title.strip() or None
         b.image_url  = url
         b.link_url   = link
@@ -805,6 +847,8 @@ def admin_del_banner(
     b = db.query(Banner).filter(Banner.id == bid).first()
     if not b:
         raise HTTPException(404, "Banner not found")
+    if b.image_url:
+        STORAGE.delete(b.image_url)          # 清掉存储里的 Banner 媒体文件
     db.delete(b); db.commit()
     return {"ok": True}
 
