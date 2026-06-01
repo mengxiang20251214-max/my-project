@@ -53,6 +53,10 @@ app.include_router(users_router.router,      prefix="/api")
 class CategoryCreate(BaseModel):
     name: str
 
+class ChangePassword(BaseModel):
+    old_password: str
+    new_password: str
+
 class SettingsUpdate(BaseModel):
     site_name: Optional[str] = None
     site_description: Optional[str] = None
@@ -324,11 +328,18 @@ def admin_stats(
 def admin_list_videos(
     page: int = Query(1, ge=1),
     page_size: int = Query(15, ge=1, le=50),
+    title: Optional[str] = Query(None),          # 标题模糊搜索
+    category_id: Optional[int] = Query(None),    # 分类筛选
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
-    total = db.query(Video).count()
-    videos = (db.query(Video).order_by(Video.created_at.desc())
+    q = db.query(Video)
+    if title and title.strip():
+        q = q.filter(Video.title.ilike(f"%{title.strip()}%"))
+    if category_id:
+        q = q.filter(Video.category_id == category_id)
+    total = q.count()
+    videos = (q.order_by(Video.created_at.desc())
               .offset((page - 1) * page_size).limit(page_size).all())
     return {
         "total": total, "page": page,
@@ -664,5 +675,23 @@ def admin_save_settings(
             row.value = v
         else:
             db.add(SiteSetting(key=k, value=v))
+    db.commit()
+    return {"ok": True}
+
+
+# ── 修改密码 ─────────────────────────────────────────────────────────────────
+@app.post("/api/admin/change-password", tags=["admin"])
+def admin_change_password(
+    body: ChangePassword,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    if not verify_password(body.old_password, current_user.password_hash):
+        raise HTTPException(400, "Current password is incorrect")
+    if len(body.new_password) < 6:
+        raise HTTPException(400, "New password must be at least 6 characters")
+    if body.new_password == body.old_password:
+        raise HTTPException(400, "New password must differ from the current one")
+    current_user.password_hash = get_password_hash(body.new_password)
     db.commit()
     return {"ok": True}
