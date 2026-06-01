@@ -31,14 +31,22 @@ UPLOAD_DIR = os.path.join(STATIC_DIR, "uploads")
 CHUNK_SIZE = 1024 * 1024
 ALLOWED_VIDEO_EXT = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".m4v", ".flv"}
 
+# ── CORS 允许的前端来源（换域名只改这里！）──────────────────────────────────────
+# 部署到新域名后，把 Vercel 正式域名加进这个列表即可。
+ALLOWED_ORIGINS = [
+    "https://blog-frontend.vercel.app",   # ← Vercel 正式域名，换域名改这一行
+    "http://localhost:3000",              # 本地 python -m http.server 3000
+    "http://127.0.0.1:3000",
+]
+
 # ── 应用初始化 ────────────────────────────────────────────────────────────────
 app = FastAPI(title="VideoHub Pro API", version="4.0.0",
               docs_url="/docs", redoc_url="/redoc")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],          # 生产环境改为具体域名
-    allow_credentials=True,
+    allow_origins=ALLOWED_ORIGINS,   # 白名单（见上方 ALLOWED_ORIGINS）
+    allow_credentials=False,         # 用 Authorization 头鉴权，不依赖 cookie
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -245,6 +253,14 @@ async def _save_video_file(file: UploadFile) -> tuple[str, int, str]:
     return f"/static/uploads/videos/{filename}", size, dest
 
 
+def _is_safe_url(u: Optional[str]) -> bool:
+    """只允许 http(s):// 绝对地址或 / 开头的相对路径，挡掉 javascript: 等 XSS 向量。"""
+    if not u:
+        return True                       # 空值合法（可选字段）
+    u = u.strip().lower()
+    return u.startswith(("http://", "https://", "/"))
+
+
 def _fmt_size(n: Optional[int]) -> str:
     if not n: return ""
     if n < 1024: return f"{n} B"
@@ -377,6 +393,8 @@ async def admin_add_video(
                         cover_url = auto
         else:
             final_url = video_url.strip() or None
+            if not _is_safe_url(final_url):
+                raise HTTPException(400, "Invalid video URL (must start with http://, https:// or /)")
 
         if not title.strip():
             title = "未命名视频"
@@ -468,7 +486,10 @@ async def admin_edit_video(
                     if auto:
                         v.cover_url = auto
         elif video_type == "url":
-            v.video_url = video_url.strip() or None
+            nu = video_url.strip() or None
+            if not _is_safe_url(nu):
+                raise HTTPException(400, "Invalid video URL (must start with http://, https:// or /)")
+            v.video_url = nu
         db.commit(); db.refresh(v)
         return {"ok": True, "video": _video_dict(v)}
     except HTTPException:
@@ -560,6 +581,8 @@ def _resolve_banner_media(
         url, mt = save_banner_file(media_file, os.path.join(UPLOAD_DIR, "banners"))
         return url, mt
     url = (image_url or "").strip() or None
+    if not _is_safe_url(url):
+        raise HTTPException(400, "Invalid media URL (must start with http://, https:// or /)")
     mt = media_type if media_type in ("image", "gif", "video") else "image"
     return url, mt
 
@@ -580,9 +603,12 @@ def admin_add_banner(
     if position not in ("top", "left", "right"):
         raise HTTPException(400, "position must be top/left/right")
     try:
+        link = link_url.strip() or None
+        if not _is_safe_url(link):
+            raise HTTPException(400, "Invalid link URL (must start with http://, https:// or /)")
         url, mt = _resolve_banner_media(media_file, image_url, media_type)
         b = Banner(position=position, title=title.strip() or None,
-                   image_url=url, link_url=link_url.strip() or None,
+                   image_url=url, link_url=link,
                    media_type=mt, sort_order=sort_order, duration=max(500, duration))
         db.add(b); db.commit(); db.refresh(b)
         return {"ok": True, "id": b.id, "image_url": url, "media_type": mt}
@@ -610,10 +636,13 @@ def admin_edit_banner(
     if not b:
         raise HTTPException(404, "Banner not found")
     try:
+        link = link_url.strip() or None
+        if not _is_safe_url(link):
+            raise HTTPException(400, "Invalid link URL (must start with http://, https:// or /)")
         url, mt = _resolve_banner_media(media_file, image_url, media_type)
         b.title      = title.strip() or None
         b.image_url  = url
-        b.link_url   = link_url.strip() or None
+        b.link_url   = link
         b.media_type = mt
         b.sort_order = sort_order
         b.duration   = max(500, duration)
