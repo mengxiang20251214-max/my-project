@@ -2,7 +2,7 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from ..database import get_db
 from ..models import Video
@@ -51,7 +51,8 @@ def list_videos(
         q = q.filter(Video.category_id == category_id)
     q = q.order_by(Video.views.desc() if sort == "views" else Video.created_at.desc())
     total = q.count()
-    items = q.offset((page-1)*page_size).limit(page_size).all()
+    items = (q.options(joinedload(Video.category))
+             .offset((page-1)*page_size).limit(page_size).all())
     return {"total": total, "page": page,
             "pages": max(1, (total+page_size-1)//page_size),
             "items": [_out(v) for v in items]}
@@ -70,7 +71,8 @@ def search_videos(
         query = query.filter(Video.category_id == category_id)
     query = query.order_by(Video.views.desc() if sort == "views" else Video.created_at.desc())
     total = query.count()
-    items = query.offset((page-1)*page_size).limit(page_size).all()
+    items = (query.options(joinedload(Video.category))
+             .offset((page-1)*page_size).limit(page_size).all())
     return {"total": total, "page": page,
             "pages": max(1, (total+page_size-1)//page_size),
             "items": [_out(v) for v in items]}
@@ -78,7 +80,8 @@ def search_videos(
 
 @router.get("/videos/{video_id}", response_model=VideoOut, tags=["videos"])
 def get_video(video_id: int, db: Session = Depends(get_db)):
-    v = db.query(Video).filter(Video.id == video_id).first()
+    v = (db.query(Video).options(joinedload(Video.category))
+         .filter(Video.id == video_id).first())
     if not v:
         raise HTTPException(status_code=404, detail="Video not found")
     return _out(v)

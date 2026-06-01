@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# 环境变量（密钥不入库）
+.env
+
+# 用户上传的媒体（体积大，不入库；生产用对象存储/卷）
+static/uploads/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 注意：blog_video.db 仍然入库 —— Railway 文件系统是临时的，
+# 这个 SQLite 文件是当前唯一的持久化数据源，删它会丢线上数据。

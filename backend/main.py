@@ -3,6 +3,7 @@ VideoHub Pro — 后端 JSON API（前后端分离版）
 纯 REST/JSON，无模板渲染，前端由 blog-video-frontend 独立提供。
 """
 import os, re, uuid, logging
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional, List
 
@@ -11,7 +12,7 @@ from fastapi import FastAPI, Depends, Form, HTTPException, Query, UploadFile, Fi
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from .database import engine, get_db, Base
 from .models import Video, Category, User, Banner, SiteSetting, Country, VideoType
@@ -31,22 +32,49 @@ UPLOAD_DIR = os.path.join(STATIC_DIR, "uploads")
 CHUNK_SIZE = 1024 * 1024
 ALLOWED_VIDEO_EXT = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".m4v", ".flv"}
 
-# ── CORS 允许的前端来源（换域名只改这里！）──────────────────────────────────────
-# 部署到新域名后，把 Vercel 正式域名加进这个列表即可。
+# ── CORS 允许的前端来源 ──────────────────────────────────────────────────────────
+# 显式白名单：本地开发用。生产域名通过下面的正则统一放行，避免改域名后忘了加白名单
+# 导致整个前端被浏览器 CORS 拦截（曾经发生过：实际域名是 *-zeta-mocha.vercel.app，
+# 而白名单里只写了 blog-frontend.vercel.app，导致线上前端一个接口都调不通）。
 ALLOWED_ORIGINS = [
-    "https://blog-frontend.vercel.app",   # ← Vercel 正式域名，换域名改这一行
-    "http://localhost:3000",              # 本地 python -m http.server 3000
+    "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "http://localhost:5500",              # VSCode Live Server 默认端口
+    "http://127.0.0.1:5500",
 ]
+# 放行任意 Vercel 部署（正式 + 预览环境，如 blog-frontend-xxx.vercel.app）。
+# 额外可通过环境变量 EXTRA_CORS_ORIGIN 追加一个自定义域名。
+ALLOWED_ORIGIN_REGEX = r"https://([a-z0-9-]+\.)*vercel\.app"
+_extra = os.getenv("EXTRA_CORS_ORIGIN")
+if _extra:
+    ALLOWED_ORIGINS.append(_extra.strip())
 
 # ── 应用初始化 ────────────────────────────────────────────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """启动时建表 / 迁移 / 播种种子数据（取代已弃用的 @app.on_event）。"""
+    Base.metadata.create_all(bind=engine)
+    _migrate_db()
+    for d in ["videos", "covers", "banners"]:
+        os.makedirs(os.path.join(UPLOAD_DIR, d), exist_ok=True)
+    db: Session = next(get_db())
+    try:
+        _seed_data(db)
+        _seed_banners(db)
+        _seed_taxonomy(db)
+    finally:
+        db.close()
+    yield
+
+
 app = FastAPI(title="VideoHub Pro API", version="4.0.0",
-              docs_url="/docs", redoc_url="/redoc")
+              docs_url="/docs", redoc_url="/redoc", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,   # 白名单（见上方 ALLOWED_ORIGINS）
-    allow_credentials=False,         # 用 Authorization 头鉴权，不依赖 cookie
+    allow_origins=ALLOWED_ORIGINS,            # 本地开发白名单
+    allow_origin_regex=ALLOWED_ORIGIN_REGEX,  # 生产/预览：任意 *.vercel.app
+    allow_credentials=False,                  # 用 Authorization 头鉴权，不依赖 cookie
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -72,22 +100,7 @@ class SettingsUpdate(BaseModel):
     footer_text: Optional[str] = None
 
 
-# ── 启动事件 ─────────────────────────────────────────────────────────────────
-@app.on_event("startup")
-def startup_event():
-    Base.metadata.create_all(bind=engine)
-    _migrate_db()
-    for d in ["videos", "covers", "banners"]:
-        os.makedirs(os.path.join(UPLOAD_DIR, d), exist_ok=True)
-    db: Session = next(get_db())
-    try:
-        _seed_data(db)
-        _seed_banners(db)
-        _seed_taxonomy(db)
-    finally:
-        db.close()
-
-
+# ── 启动迁移 / 种子 ──────────────────────────────────────────────────────────
 def _migrate_db():
     from sqlalchemy import text, inspect as sa_inspect
     insp = sa_inspect(engine)
@@ -330,7 +343,8 @@ def admin_stats(
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
-    recent = (db.query(Video).order_by(Video.created_at.desc()).limit(6).all())
+    recent = (db.query(Video).options(joinedload(Video.category))
+              .order_by(Video.created_at.desc()).limit(6).all())
     return {
         "videos":     db.query(Video).count(),
         "categories": db.query(Category).count(),
@@ -355,7 +369,8 @@ def admin_list_videos(
     if category_id:
         q = q.filter(Video.category_id == category_id)
     total = q.count()
-    videos = (q.order_by(Video.created_at.desc())
+    videos = (q.options(joinedload(Video.category))
+              .order_by(Video.created_at.desc())
               .offset((page - 1) * page_size).limit(page_size).all())
     return {
         "total": total, "page": page,
