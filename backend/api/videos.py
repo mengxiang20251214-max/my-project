@@ -20,6 +20,10 @@ class VideoOut(BaseModel):
     cover_url: Optional[str]
     category_id: Optional[int]
     category_name: Optional[str]
+    country_id: Optional[int]
+    country_name: Optional[str]
+    type_id: Optional[int]
+    type_name: Optional[str]
     views: int
     file_size: Optional[int]
     created_at: str
@@ -34,6 +38,10 @@ def _out(v: Video) -> VideoOut:
         video_url=v.video_url, video_file=v.video_file, video_type=v.video_type,
         cover_url=v.cover_url, category_id=v.category_id,
         category_name=v.category.name if v.category else None,
+        country_id=v.country_id,
+        country_name=v.country.name if v.country else None,
+        type_id=v.type_id,
+        type_name=v.vtype.name if v.vtype else None,
         views=v.views, file_size=v.file_size,
         created_at=v.created_at.strftime("%Y-%m-%d %H:%M"),
     )
@@ -42,13 +50,22 @@ def _out(v: Video) -> VideoOut:
 @router.get("/videos", response_model=dict, tags=["videos"])
 def list_videos(
     page: int = Query(1, ge=1), page_size: int = Query(12, ge=1, le=50),
-    category_id: Optional[int] = Query(None), db: Session = Depends(get_db),
+    category_id: Optional[int] = Query(None),
+    country_id: Optional[int] = Query(None),
+    type_id: Optional[int] = Query(None),
+    sort: str = Query("created_at"),
+    db: Session = Depends(get_db),
 ):
     q = db.query(Video)
     if category_id:
         q = q.filter(Video.category_id == category_id)
+    if country_id:
+        q = q.filter(Video.country_id == country_id)
+    if type_id:
+        q = q.filter(Video.type_id == type_id)
+    q = q.order_by(Video.views.desc() if sort == "views" else Video.created_at.desc())
     total = q.count()
-    items = q.order_by(Video.created_at.desc()).offset((page-1)*page_size).limit(page_size).all()
+    items = q.offset((page-1)*page_size).limit(page_size).all()
     return {"total": total, "page": page,
             "pages": max(1, (total+page_size-1)//page_size),
             "items": [_out(v) for v in items]}
@@ -57,6 +74,7 @@ def list_videos(
 @router.get("/videos/search", response_model=dict, tags=["videos"])
 def search_videos(
     q: str = Query(""), category_id: Optional[int] = Query(None),
+    country_id: Optional[int] = Query(None), type_id: Optional[int] = Query(None),
     sort: str = Query("created_at"), page: int = Query(1, ge=1),
     page_size: int = Query(12, ge=1, le=50), db: Session = Depends(get_db),
 ):
@@ -65,6 +83,10 @@ def search_videos(
         query = query.filter(Video.title.ilike(f"%{q.strip()}%"))
     if category_id:
         query = query.filter(Video.category_id == category_id)
+    if country_id:
+        query = query.filter(Video.country_id == country_id)
+    if type_id:
+        query = query.filter(Video.type_id == type_id)
     query = query.order_by(Video.views.desc() if sort == "views" else Video.created_at.desc())
     total = query.count()
     items = query.offset((page-1)*page_size).limit(page_size).all()
