@@ -17,7 +17,7 @@ from .database import engine, get_db, Base
 from .models import Video, Category, User, Banner, SiteSetting, Country, VideoType
 from .auth import (get_current_user, require_admin,
                    verify_password, get_password_hash, create_access_token)
-from .utils import extract_cover
+from .utils import extract_cover, save_banner_file, BANNER_ALLOWED_EXT
 from .api import videos as videos_router
 from .api import categories as categories_router
 from .api import users as users_router
@@ -53,28 +53,6 @@ app.include_router(users_router.router,      prefix="/api")
 class CategoryCreate(BaseModel):
     name: str
 
-class TaxonomyCreate(BaseModel):
-    """国家 / 视频类型 通用创建模型。"""
-    name: str
-    sort_order: int = 0
-
-class BannerCreate(BaseModel):
-    position: str
-    title: Optional[str] = None
-    image_url: Optional[str] = None
-    link_url: Optional[str] = None
-    media_type: str = "image"          # image / gif / video
-    sort_order: int = 0
-    duration: int = 3000
-
-class BannerUpdate(BaseModel):
-    title: Optional[str] = None
-    image_url: Optional[str] = None
-    link_url: Optional[str] = None
-    media_type: str = "image"
-    sort_order: int = 0
-    duration: int = 3000
-
 class SettingsUpdate(BaseModel):
     site_name: Optional[str] = None
     site_description: Optional[str] = None
@@ -87,7 +65,7 @@ class SettingsUpdate(BaseModel):
 def startup_event():
     Base.metadata.create_all(bind=engine)
     _migrate_db()
-    for d in ["videos", "covers"]:
+    for d in ["videos", "covers", "banners"]:
         os.makedirs(os.path.join(UPLOAD_DIR, d), exist_ok=True)
     db: Session = next(get_db())
     try:
@@ -280,10 +258,6 @@ def _video_dict(v: Video) -> dict:
         "category_id": v.category_id,
         "category_name": v.category.name if v.category else None,
         "category_slug": v.category.slug if v.category else None,
-        "country_id": v.country_id,
-        "country_name": v.country.name if v.country else None,
-        "type_id": v.type_id,
-        "type_name": v.vtype.name if v.vtype else None,
         "views": v.views,
         "file_size": v.file_size,
         "file_size_str": _fmt_size(v.file_size),
@@ -361,8 +335,6 @@ def admin_list_videos(
         "pages": max(1, (total + page_size - 1) // page_size),
         "items": [_video_dict(v) for v in videos],
         "categories": [{"id": c.id, "name": c.name} for c in db.query(Category).all()],
-        "countries": [{"id": c.id, "name": c.name} for c in db.query(Country).order_by(Country.sort_order).all()],
-        "types": [{"id": t.id, "name": t.name} for t in db.query(VideoType).order_by(VideoType.sort_order).all()],
     }
 
 
@@ -374,15 +346,11 @@ async def admin_add_video(
     cover_url:    str  = Form(""),
     description:  str  = Form(""),
     category_id:  Optional[str] = Form(None),
-    country_id:   Optional[str] = Form(None),
-    type_id:      Optional[str] = Form(None),
     video_file:   Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    cat_id     = int(category_id) if (category_id or "").strip().isdigit() else None
-    country_pk = int(country_id)  if (country_id or "").strip().isdigit() else None
-    type_pk    = int(type_id)     if (type_id or "").strip().isdigit() else None
+    cat_id = int(category_id) if (category_id or "").strip().isdigit() else None
     final_url, final_file, file_size = None, None, None
     try:
         if video_type == "upload" and video_file and video_file.filename:
@@ -403,22 +371,21 @@ async def admin_add_video(
             title = "未命名视频"
 
         if not (final_url or final_file):
-            raise HTTPException(400, "请提供视频 URL 或上传视频文件")
+            raise HTTPException(400, "Please provide a video URL or upload a file")
 
         v = Video(
             title=title.strip(), video_url=final_url, video_file=final_file,
             video_type=video_type, cover_url=cover_url.strip() or None,
             description=description.strip() or None,
-            category_id=cat_id, country_id=country_pk, type_id=type_pk,
-            user_id=current_user.id, file_size=file_size,
+            category_id=cat_id, user_id=current_user.id, file_size=file_size,
         )
         db.add(v); db.commit(); db.refresh(v)
         return {"ok": True, "video": _video_dict(v)}
     except HTTPException:
         raise
     except Exception as exc:
-        logger.exception("添加视频失败: %s", exc)
-        raise HTTPException(500, f"添加视频失败：{exc}")
+        logger.exception("Add video failed: %s", exc)
+        raise HTTPException(500, f"Add video failed: {exc}")
 
 
 @app.post("/api/admin/videos/batch", tags=["admin"])
@@ -452,8 +419,8 @@ async def admin_batch_upload(
             db.commit()
         return {"ok": True, "count": len(added), "titles": added}
     except Exception as exc:
-        logger.exception("批量上传失败: %s", exc)
-        raise HTTPException(500, f"批量上传失败：{exc}")
+        logger.exception("Batch upload failed: %s", exc)
+        raise HTTPException(500, f"Batch upload failed: {exc}")
 
 
 @app.post("/api/admin/videos/{vid}/edit", tags=["admin"])
@@ -465,25 +432,19 @@ async def admin_edit_video(
     cover_url:   str = Form(""),
     description: str = Form(""),
     category_id: Optional[str] = Form(None),
-    country_id:  Optional[str] = Form(None),
-    type_id:     Optional[str] = Form(None),
     video_file:  Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
     v = db.query(Video).filter(Video.id == vid).first()
     if not v:
-        raise HTTPException(404, "视频不存在")
-    cat_id     = int(category_id) if (category_id or "").strip().isdigit() else None
-    country_pk = int(country_id)  if (country_id or "").strip().isdigit() else None
-    type_pk    = int(type_id)     if (type_id or "").strip().isdigit() else None
+        raise HTTPException(404, "Video not found")
+    cat_id = int(category_id) if (category_id or "").strip().isdigit() else None
     try:
         v.title       = title.strip()
         v.description = description.strip() or None
         v.cover_url   = cover_url.strip() or None
         v.category_id = cat_id
-        v.country_id  = country_pk
-        v.type_id     = type_pk
         v.video_type  = video_type
         if video_type == "upload" and video_file and video_file.filename:
             ext = os.path.splitext(video_file.filename)[1].lower()
@@ -502,8 +463,8 @@ async def admin_edit_video(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.exception("编辑视频失败: %s", exc)
-        raise HTTPException(500, f"编辑视频失败：{exc}")
+        logger.exception("Edit video failed: %s", exc)
+        raise HTTPException(500, f"Edit video failed: {exc}")
 
 
 @app.delete("/api/admin/videos/{vid}", tags=["admin"])
@@ -514,7 +475,7 @@ def admin_delete_video(
 ):
     v = db.query(Video).filter(Video.id == vid).first()
     if not v:
-        raise HTTPException(404, "视频不存在")
+        raise HTTPException(404, "Video not found")
     if v.video_file and v.video_file.startswith("/static/"):
         local = os.path.join(BASE_DIR, "..", v.video_file.lstrip("/"))
         if os.path.isfile(local):
@@ -532,7 +493,7 @@ def admin_add_category(
 ):
     slug = re.sub(r"[^\w\-]", "", re.sub(r"\s+", "-", body.name.lower().strip())) or "cat"
     if db.query(Category).filter(Category.slug == slug).first():
-        raise HTTPException(409, "分类已存在")
+        raise HTTPException(409, "Category already exists")
     c = Category(name=body.name.strip(), slug=slug)
     db.add(c); db.commit(); db.refresh(c)
     return {"ok": True, "category": {"id": c.id, "name": c.name, "slug": c.slug}}
@@ -546,7 +507,7 @@ def admin_del_category(
 ):
     cat = db.query(Category).filter(Category.id == cid).first()
     if not cat:
-        raise HTTPException(404, "分类不存在")
+        raise HTTPException(404, "Category not found")
     db.query(Video).filter(Video.category_id == cid).update({"category_id": None})
     db.delete(cat); db.commit()
     return {"ok": True}
@@ -572,40 +533,86 @@ def admin_list_banners(
             for b in banners]
 
 
+def _resolve_banner_media(
+    media_file: Optional[UploadFile],
+    image_url: str,
+    media_type: str,
+) -> tuple[Optional[str], str]:
+    """
+    解析 Banner 媒体来源：优先上传文件，其次填写的 URL。
+    返回 (最终 URL, media_type)。上传文件时 media_type 由扩展名自动判定。
+    """
+    if media_file and media_file.filename:
+        ext = os.path.splitext(media_file.filename)[1].lower()
+        if ext not in BANNER_ALLOWED_EXT:
+            raise HTTPException(400, f"Unsupported banner file type: {ext or 'unknown'}")
+        url, mt = save_banner_file(media_file, os.path.join(UPLOAD_DIR, "banners"))
+        return url, mt
+    url = (image_url or "").strip() or None
+    mt = media_type if media_type in ("image", "gif", "video") else "image"
+    return url, mt
+
+
 @app.post("/api/admin/banners", tags=["admin"])
 def admin_add_banner(
-    body: BannerCreate,
+    position:   str = Form(...),
+    title:      str = Form(""),
+    image_url:  str = Form(""),
+    link_url:   str = Form(""),
+    media_type: str = Form("image"),
+    sort_order: int = Form(0),
+    duration:   int = Form(3000),
+    media_file: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
-    if body.position not in ("top", "left", "right"):
-        raise HTTPException(400, "position 必须是 top/left/right")
-    b = Banner(position=body.position, title=body.title,
-               image_url=body.image_url, link_url=body.link_url,
-               media_type=body.media_type if body.media_type in ("image","gif","video") else "image",
-               sort_order=body.sort_order, duration=max(500, body.duration))
-    db.add(b); db.commit(); db.refresh(b)
-    return {"ok": True, "id": b.id}
+    if position not in ("top", "left", "right"):
+        raise HTTPException(400, "position must be top/left/right")
+    try:
+        url, mt = _resolve_banner_media(media_file, image_url, media_type)
+        b = Banner(position=position, title=title.strip() or None,
+                   image_url=url, link_url=link_url.strip() or None,
+                   media_type=mt, sort_order=sort_order, duration=max(500, duration))
+        db.add(b); db.commit(); db.refresh(b)
+        return {"ok": True, "id": b.id, "image_url": url, "media_type": mt}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Add banner failed: %s", exc)
+        raise HTTPException(500, f"Add banner failed: {exc}")
 
 
-@app.put("/api/admin/banners/{bid}", tags=["admin"])
+@app.post("/api/admin/banners/{bid}/edit", tags=["admin"])
 def admin_edit_banner(
     bid: int,
-    body: BannerUpdate,
+    title:      str = Form(""),
+    image_url:  str = Form(""),
+    link_url:   str = Form(""),
+    media_type: str = Form("image"),
+    sort_order: int = Form(0),
+    duration:   int = Form(3000),
+    media_file: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
     b = db.query(Banner).filter(Banner.id == bid).first()
     if not b:
-        raise HTTPException(404, "Banner 不存在")
-    b.title      = body.title
-    b.image_url  = body.image_url
-    b.link_url   = body.link_url
-    b.media_type = body.media_type if body.media_type in ("image","gif","video") else "image"
-    b.sort_order = body.sort_order
-    b.duration   = max(500, body.duration)
-    db.commit()
-    return {"ok": True}
+        raise HTTPException(404, "Banner not found")
+    try:
+        url, mt = _resolve_banner_media(media_file, image_url, media_type)
+        b.title      = title.strip() or None
+        b.image_url  = url
+        b.link_url   = link_url.strip() or None
+        b.media_type = mt
+        b.sort_order = sort_order
+        b.duration   = max(500, duration)
+        db.commit()
+        return {"ok": True, "image_url": url, "media_type": mt}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Edit banner failed: %s", exc)
+        raise HTTPException(500, f"Edit banner failed: {exc}")
 
 
 @app.post("/api/admin/banners/{bid}/toggle", tags=["admin"])
@@ -616,7 +623,7 @@ def admin_toggle_banner(
 ):
     b = db.query(Banner).filter(Banner.id == bid).first()
     if not b:
-        raise HTTPException(404, "Banner 不存在")
+        raise HTTPException(404, "Banner not found")
     b.is_active = not b.is_active
     db.commit()
     return {"ok": True, "is_active": b.is_active}
@@ -630,7 +637,7 @@ def admin_del_banner(
 ):
     b = db.query(Banner).filter(Banner.id == bid).first()
     if not b:
-        raise HTTPException(404, "Banner 不存在")
+        raise HTTPException(404, "Banner not found")
     db.delete(b); db.commit()
     return {"ok": True}
 
@@ -658,74 +665,4 @@ def admin_save_settings(
         else:
             db.add(SiteSetting(key=k, value=v))
     db.commit()
-    return {"ok": True}
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 二级菜单：国家 + 视频类型（公开读取 + 管理增删）
-# ══════════════════════════════════════════════════════════════════════════════
-
-def _slugify(name: str) -> str:
-    return re.sub(r"[^\w\-]", "", re.sub(r"\s+", "-", name.lower().strip())) or "x"
-
-
-@app.get("/api/countries", tags=["public"])
-def list_countries(db: Session = Depends(get_db)):
-    """公开：所有国家，含视频数。"""
-    rows = db.query(Country).order_by(Country.sort_order, Country.id).all()
-    return [{"id": c.id, "name": c.name, "slug": c.slug,
-             "video_count": db.query(Video).filter(Video.country_id == c.id).count()}
-            for c in rows]
-
-
-@app.get("/api/types", tags=["public"])
-def list_types(db: Session = Depends(get_db)):
-    """公开：所有视频题材类型，含视频数。"""
-    rows = db.query(VideoType).order_by(VideoType.sort_order, VideoType.id).all()
-    return [{"id": t.id, "name": t.name, "slug": t.slug,
-             "video_count": db.query(Video).filter(Video.type_id == t.id).count()}
-            for t in rows]
-
-
-@app.post("/api/admin/countries", tags=["admin"])
-def admin_add_country(body: TaxonomyCreate, db: Session = Depends(get_db),
-                      _: User = Depends(require_admin)):
-    slug = _slugify(body.name)
-    if db.query(Country).filter(Country.slug == slug).first():
-        raise HTTPException(409, "国家已存在")
-    c = Country(name=body.name.strip(), slug=slug, sort_order=body.sort_order)
-    db.add(c); db.commit(); db.refresh(c)
-    return {"ok": True, "id": c.id}
-
-
-@app.delete("/api/admin/countries/{cid}", tags=["admin"])
-def admin_del_country(cid: int, db: Session = Depends(get_db),
-                      _: User = Depends(require_admin)):
-    c = db.query(Country).filter(Country.id == cid).first()
-    if not c:
-        raise HTTPException(404, "国家不存在")
-    db.query(Video).filter(Video.country_id == cid).update({"country_id": None})
-    db.delete(c); db.commit()
-    return {"ok": True}
-
-
-@app.post("/api/admin/types", tags=["admin"])
-def admin_add_type(body: TaxonomyCreate, db: Session = Depends(get_db),
-                   _: User = Depends(require_admin)):
-    slug = _slugify(body.name)
-    if db.query(VideoType).filter(VideoType.slug == slug).first():
-        raise HTTPException(409, "类型已存在")
-    t = VideoType(name=body.name.strip(), slug=slug, sort_order=body.sort_order)
-    db.add(t); db.commit(); db.refresh(t)
-    return {"ok": True, "id": t.id}
-
-
-@app.delete("/api/admin/types/{tid}", tags=["admin"])
-def admin_del_type(tid: int, db: Session = Depends(get_db),
-                   _: User = Depends(require_admin)):
-    t = db.query(VideoType).filter(VideoType.id == tid).first()
-    if not t:
-        raise HTTPException(404, "类型不存在")
-    db.query(Video).filter(Video.type_id == tid).update({"type_id": None})
-    db.delete(t); db.commit()
     return {"ok": True}

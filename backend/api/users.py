@@ -28,9 +28,9 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     """用户登录，返回 JWT Token。"""
     user = db.query(User).filter(User.username == form_data.username).first()
     if not user or not verify_password(form_data.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
+        raise HTTPException(status_code=401, detail="Invalid username or password")
     if not user.is_active:
-        raise HTTPException(status_code=403, detail="账号已被禁用")
+        raise HTTPException(status_code=403, detail="Account is disabled")
     token = create_access_token({"sub": user.username})
     return {"access_token": token, "token_type": "bearer", "username": user.username, "role": user.role}
 

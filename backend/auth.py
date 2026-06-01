@@ -91,7 +91,7 @@ def require_user(
 ) -> models.User:
     """强制要求已登录，未登录抛出 401。"""
     if not current_user:
-        raise HTTPException(status_code=401, detail="请先登录")
+        raise HTTPException(status_code=401, detail="Please sign in first")
     return current_user
 
 
@@ -100,7 +100,7 @@ def require_admin(
 ) -> models.User:
     """强制要求管理员角色，未授权抛出 403。"""
     if not current_user:
-        raise HTTPException(status_code=401, detail="请先登录")
+        raise HTTPException(status_code=401, detail="Please sign in first")
     if current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="权限不足")
+        raise HTTPException(status_code=403, detail="Permission denied")
     return current_user

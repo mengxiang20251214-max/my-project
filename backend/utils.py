@@ -1,11 +1,55 @@
-"""共享工具函数（封面提取等）。"""
+"""共享工具函数（封面提取、Banner 文件保存等）。"""
 import logging
 import os
 import shutil
 import subprocess
+import uuid
 from typing import Optional
 
 logger = logging.getLogger("videohub.utils")
+
+# Banner 允许的上传格式 → 媒体类型
+BANNER_IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp"}
+BANNER_GIF_EXT   = {".gif"}
+BANNER_VIDEO_EXT = {".mp4", ".webm", ".mov", ".m4v"}
+BANNER_ALLOWED_EXT = BANNER_IMAGE_EXT | BANNER_GIF_EXT | BANNER_VIDEO_EXT
+
+
+def banner_media_type_for(ext: str) -> str:
+    """根据扩展名推断 Banner 媒体类型：image / gif / video。"""
+    ext = ext.lower()
+    if ext in BANNER_VIDEO_EXT:
+        return "video"
+    if ext in BANNER_GIF_EXT:
+        return "gif"
+    return "image"
+
+
+def save_banner_file(file, banners_dir: str) -> tuple[str, str]:
+    """
+    保存上传的 Banner 文件（图片/GIF/视频）到 banners_dir。
+
+    Args:
+        file:        FastAPI UploadFile（.file 为同步文件对象）
+        banners_dir: 保存目录绝对路径（自动创建）
+
+    Returns:
+        (相对 URL, media_type)，如 ("/static/uploads/banners/xxx.mp4", "video")
+
+    Raises:
+        ValueError: 扩展名不被允许
+    """
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in BANNER_ALLOWED_EXT:
+        raise ValueError(f"不支持的 Banner 文件类型: {ext or '未知'}")
+    os.makedirs(banners_dir, exist_ok=True)
+    filename = f"{uuid.uuid4().hex}{ext}"
+    dest = os.path.abspath(os.path.join(banners_dir, filename))
+    # UploadFile.file 为标准文件对象，用 shutil 同步落盘（Banner 文件通常不大）
+    file.file.seek(0)
+    with open(dest, "wb") as out:
+        shutil.copyfileobj(file.file, out)
+    return f"/static/uploads/banners/{filename}", banner_media_type_for(ext)
 
 
 def extract_cover(video_abs: str, covers_dir: str, stem: str) -> Optional[str]:
