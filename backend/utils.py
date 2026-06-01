@@ -6,7 +6,12 @@ import subprocess
 import uuid
 from typing import Optional
 
+import aiofiles
+
 logger = logging.getLogger("videohub.utils")
+
+# 流式落盘的分块大小（1MB）；Banner 视频可能很大，分块写避免一次性读进内存
+CHUNK_SIZE = 1024 * 1024
 
 # Banner 允许的上传格式 → 媒体类型
 BANNER_IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp"}
@@ -25,12 +30,15 @@ def banner_media_type_for(ext: str) -> str:
     return "image"
 
 
-def save_banner_file(file, banners_dir: str) -> tuple[str, str]:
+async def save_banner_file(file, banners_dir: str) -> tuple[str, str]:
     """
-    保存上传的 Banner 文件（图片/GIF/视频）到 banners_dir。
+    异步流式保存上传的 Banner 文件（图片/GIF/视频）到 banners_dir。
+
+    Banner 现在允许任意大小的图/GIF/视频，所以用 aiofiles 分块写入，
+    避免把整个文件读进内存、也不阻塞事件循环（大视频上传时尤其重要）。
 
     Args:
-        file:        FastAPI UploadFile（.file 为同步文件对象）
+        file:        FastAPI UploadFile
         banners_dir: 保存目录绝对路径（自动创建）
 
     Returns:
@@ -45,10 +53,15 @@ def save_banner_file(file, banners_dir: str) -> tuple[str, str]:
     os.makedirs(banners_dir, exist_ok=True)
     filename = f"{uuid.uuid4().hex}{ext}"
     dest = os.path.abspath(os.path.join(banners_dir, filename))
-    # UploadFile.file 为标准文件对象，用 shutil 同步落盘（Banner 文件通常不大）
-    file.file.seek(0)
-    with open(dest, "wb") as out:
-        shutil.copyfileobj(file.file, out)
+    try:
+        await file.seek(0)
+        async with aiofiles.open(dest, "wb") as out:
+            while chunk := await file.read(CHUNK_SIZE):
+                await out.write(chunk)
+    except Exception:
+        if os.path.exists(dest):
+            os.remove(dest)
+        raise
     return f"/static/uploads/banners/{filename}", banner_media_type_for(ext)
 
 

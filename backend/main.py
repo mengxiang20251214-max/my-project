@@ -8,13 +8,14 @@ from datetime import datetime
 from typing import Optional, List
 
 import aiofiles
-from fastapi import FastAPI, Depends, Form, HTTPException, Query, UploadFile, File
+from fastapi import (FastAPI, Depends, Form, HTTPException, Query,
+                     UploadFile, File, Response, BackgroundTasks)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
 
-from .database import engine, get_db, Base
+from .database import engine, get_db, Base, SessionLocal
 from .models import Video, Category, User, Banner, SiteSetting, Country, VideoType
 from .auth import (get_current_user, require_admin,
                    verify_password, get_password_hash, create_access_token)
@@ -266,6 +267,44 @@ async def _save_video_file(file: UploadFile) -> tuple[str, int, str]:
     return f"/static/uploads/videos/{filename}", size, dest
 
 
+def _video_abs_path(video_file: Optional[str]) -> Optional[str]:
+    """把 /static/uploads/videos/xxx.mp4 转成磁盘绝对路径；非本地文件返回 None。"""
+    if not video_file or not video_file.startswith("/static/"):
+        return None
+    p = os.path.abspath(os.path.join(BASE_DIR, "..", video_file.lstrip("/")))
+    return p if os.path.isfile(p) else None
+
+
+def _needs_cover(v: Video) -> bool:
+    """该视频是否「缺一张真正的封面」：本地上传、且没有自有封面（空 / 占位图）。"""
+    if v.video_type != "upload":
+        return False
+    c = (v.cover_url or "").strip()
+    return (not c) or ("picsum.photos" in c)
+
+
+def _extract_cover_bg(video_id: int) -> None:
+    """后台任务：为单个上传视频提取封面并写回 DB（独立 session，不依赖请求生命周期）。"""
+    db = SessionLocal()
+    try:
+        v = db.query(Video).filter(Video.id == video_id).first()
+        if not v:
+            return
+        abs_path = _video_abs_path(v.video_file)
+        if not abs_path:
+            return
+        stem = os.path.splitext(os.path.basename(abs_path))[0]
+        cover = extract_cover(abs_path, os.path.join(UPLOAD_DIR, "covers"), stem)
+        if cover:
+            v.cover_url = cover
+            db.commit()
+            logger.info("封面已生成 video_id=%s -> %s", video_id, cover)
+    except Exception as exc:
+        logger.exception("后台封面提取失败 video_id=%s: %s", video_id, exc)
+    finally:
+        db.close()
+
+
 def _is_safe_url(u: Optional[str]) -> bool:
     """只允许 http(s):// 绝对地址或 / 开头的相对路径，挡掉 javascript: 等 XSS 向量。"""
     if not u:
@@ -311,10 +350,12 @@ def health():
 # ══════════════════════════════════════════════════════════════════════════════
 
 @app.get("/api/public/banners", tags=["public"])
-def public_banners(db: Session = Depends(get_db)):
+def public_banners(response: Response, db: Session = Depends(get_db)):
     """获取所有启用的 Banner，按位置分组。"""
+    # 公开数据变化不频繁，给 60s CDN/浏览器缓存，减轻首页每次访问的 DB 压力
+    response.headers["Cache-Control"] = "public, max-age=60"
     rows = (db.query(Banner).filter(Banner.is_active == True)
-            .order_by(Banner.sort_order).all())
+            .order_by(Banner.position, Banner.sort_order).all())
     result: dict = {"top": [], "left": [], "right": []}
     for b in rows:
         if b.position in result:
@@ -328,8 +369,9 @@ def public_banners(db: Session = Depends(get_db)):
 
 
 @app.get("/api/public/settings", tags=["public"])
-def public_settings(db: Session = Depends(get_db)):
+def public_settings(response: Response, db: Session = Depends(get_db)):
     """获取网站公开配置。"""
+    response.headers["Cache-Control"] = "public, max-age=60"
     return {r.key: r.value for r in db.query(SiteSetting).all()}
 
 
@@ -434,6 +476,7 @@ async def admin_add_video(
 
 @app.post("/api/admin/videos/batch", tags=["admin"])
 async def admin_batch_upload(
+    background_tasks: BackgroundTasks,
     category_id:  Optional[str] = Form(None),
     title_prefix: str = Form(""),
     video_files:  List[UploadFile] = File(...),
@@ -442,6 +485,7 @@ async def admin_batch_upload(
 ):
     cat_id = int(category_id) if (category_id or "").strip().isdigit() else None
     added = []
+    new_videos = []
     try:
         for i, vf in enumerate(video_files):
             if not vf.filename:
@@ -452,15 +496,18 @@ async def admin_batch_upload(
             fp, fs, va = await _save_video_file(vf)
             base = os.path.splitext(vf.filename)[0]
             title = f"{title_prefix} {i+1}".strip() if title_prefix else base
-            stem = os.path.splitext(os.path.basename(va))[0]
-            cover = extract_cover(va, os.path.join(UPLOAD_DIR, "covers"), stem)
             v = Video(title=title, video_file=fp, video_type="upload",
-                      cover_url=cover, category_id=cat_id,
+                      cover_url=None, category_id=cat_id,
                       user_id=current_user.id, file_size=fs)
             db.add(v)
+            new_videos.append(v)
             added.append(title)
         if added:
             db.commit()
+            # 封面提取改到后台：批量上传立即返回，封面随后逐个生成（避免 N 个文件串行卡住请求）
+            for v in new_videos:
+                db.refresh(v)
+                background_tasks.add_task(_extract_cover_bg, v.id)
         return {"ok": True, "count": len(added), "titles": added}
     except Exception as exc:
         logger.exception("Batch upload failed: %s", exc)
@@ -531,6 +578,44 @@ def admin_delete_video(
     return {"ok": True}
 
 
+# ── 封面提取 / 补全 ───────────────────────────────────────────────────────────
+@app.post("/api/admin/videos/{vid}/cover", tags=["admin"])
+def admin_regenerate_cover(
+    vid: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    """为单个「本地上传」视频重新提取封面（同步，立即返回新封面 URL）。"""
+    v = db.query(Video).filter(Video.id == vid).first()
+    if not v:
+        raise HTTPException(404, "Video not found")
+    abs_path = _video_abs_path(v.video_file)
+    if not abs_path:
+        raise HTTPException(400, "Only locally-uploaded videos support cover extraction")
+    stem = os.path.splitext(os.path.basename(abs_path))[0]
+    cover = extract_cover(abs_path, os.path.join(UPLOAD_DIR, "covers"), stem)
+    if not cover:
+        raise HTTPException(
+            422, "Cover extraction failed (ffmpeg not installed or video unreadable)")
+    v.cover_url = cover
+    db.commit(); db.refresh(v)
+    return {"ok": True, "cover_url": cover}
+
+
+@app.post("/api/admin/covers/backfill", tags=["admin"])
+def admin_backfill_covers(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    """给所有「缺封面的上传视频」批量补全封面：后台逐个提取，接口立即返回任务数。"""
+    pending = [v.id for v in db.query(Video).filter(Video.video_type == "upload").all()
+               if _needs_cover(v)]
+    for vid in pending:
+        background_tasks.add_task(_extract_cover_bg, vid)
+    return {"ok": True, "scheduled": len(pending)}
+
+
 # ── 分类管理 ─────────────────────────────────────────────────────────────────
 @app.post("/api/admin/categories", tags=["admin"])
 def admin_add_category(
@@ -580,7 +665,7 @@ def admin_list_banners(
             for b in banners]
 
 
-def _resolve_banner_media(
+async def _resolve_banner_media(
     media_file: Optional[UploadFile],
     image_url: str,
     media_type: str,
@@ -593,7 +678,7 @@ def _resolve_banner_media(
         ext = os.path.splitext(media_file.filename)[1].lower()
         if ext not in BANNER_ALLOWED_EXT:
             raise HTTPException(400, f"Unsupported banner file type: {ext or 'unknown'}")
-        url, mt = save_banner_file(media_file, os.path.join(UPLOAD_DIR, "banners"))
+        url, mt = await save_banner_file(media_file, os.path.join(UPLOAD_DIR, "banners"))
         return url, mt
     url = (image_url or "").strip() or None
     if not _is_safe_url(url):
@@ -603,7 +688,7 @@ def _resolve_banner_media(
 
 
 @app.post("/api/admin/banners", tags=["admin"])
-def admin_add_banner(
+async def admin_add_banner(
     position:   str = Form(...),
     title:      str = Form(""),
     image_url:  str = Form(""),
@@ -621,7 +706,7 @@ def admin_add_banner(
         link = link_url.strip() or None
         if not _is_safe_url(link):
             raise HTTPException(400, "Invalid link URL (must start with http://, https:// or /)")
-        url, mt = _resolve_banner_media(media_file, image_url, media_type)
+        url, mt = await _resolve_banner_media(media_file, image_url, media_type)
         b = Banner(position=position, title=title.strip() or None,
                    image_url=url, link_url=link,
                    media_type=mt, sort_order=sort_order, duration=max(500, duration))
@@ -635,7 +720,7 @@ def admin_add_banner(
 
 
 @app.post("/api/admin/banners/{bid}/edit", tags=["admin"])
-def admin_edit_banner(
+async def admin_edit_banner(
     bid: int,
     title:      str = Form(""),
     image_url:  str = Form(""),
@@ -654,7 +739,7 @@ def admin_edit_banner(
         link = link_url.strip() or None
         if not _is_safe_url(link):
             raise HTTPException(400, "Invalid link URL (must start with http://, https:// or /)")
-        url, mt = _resolve_banner_media(media_file, image_url, media_type)
+        url, mt = await _resolve_banner_media(media_file, image_url, media_type)
         b.title      = title.strip() or None
         b.image_url  = url
         b.link_url   = link
@@ -668,6 +753,33 @@ def admin_edit_banner(
     except Exception as exc:
         logger.exception("Edit banner failed: %s", exc)
         raise HTTPException(500, f"Edit banner failed: {exc}")
+
+
+@app.post("/api/admin/banners/{bid}/move", tags=["admin"])
+def admin_move_banner(
+    bid: int,
+    dir: str = Query(..., pattern="^(up|down)$"),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    """上移/下移 Banner：与同一位置相邻的那条交换 sort_order（服务端原子完成）。"""
+    b = db.query(Banner).filter(Banner.id == bid).first()
+    if not b:
+        raise HTTPException(404, "Banner not found")
+    # 同位置、按 (sort_order, id) 排好序的邻居
+    siblings = (db.query(Banner).filter(Banner.position == b.position)
+                .order_by(Banner.sort_order, Banner.id).all())
+    idx = next((i for i, x in enumerate(siblings) if x.id == bid), None)
+    swap_idx = idx - 1 if dir == "up" else idx + 1
+    if idx is None or swap_idx < 0 or swap_idx >= len(siblings):
+        return {"ok": True, "moved": False}   # 已经在顶/底，无需移动
+    other = siblings[swap_idx]
+    b.sort_order, other.sort_order = other.sort_order, b.sort_order
+    # sort_order 相等时再用 id 兜底排序会失效，确保两者不同
+    if b.sort_order == other.sort_order:
+        other.sort_order += (1 if dir == "up" else -1)
+    db.commit()
+    return {"ok": True, "moved": True}
 
 
 @app.post("/api/admin/banners/{bid}/toggle", tags=["admin"])

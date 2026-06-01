@@ -8,7 +8,7 @@ services:
       - "8000:8000"
     volumes:
       - ./static/uploads:/app/static/uploads
-      - ./blog_video.db:/app/backend/blog_video.db
+      - ./blog_video.db:/app/blog_video.db
     environment:
       - SECRET_KEY=${SECRET_KEY:-change-this-in-production}
       - DATABASE_URL=sqlite:///./blog_video.db
