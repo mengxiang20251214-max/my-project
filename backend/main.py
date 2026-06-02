@@ -416,7 +416,7 @@ def public_banners(response: Response, db: Session = Depends(get_db)):
     response.headers["Cache-Control"] = "public, max-age=60"
     rows = (db.query(Banner).filter(Banner.is_active == True)
             .order_by(Banner.position, Banner.sort_order).all())
-    result: dict = {"top": [], "left": [], "right": []}
+    result: dict = {"top": [], "left": [], "right": [], "bottom": []}
     for b in rows:
         if b.position in result:
             result[b.position].append({
@@ -432,7 +432,11 @@ def public_banners(response: Response, db: Session = Depends(get_db)):
 def public_settings(response: Response, db: Session = Depends(get_db)):
     """获取网站公开配置。"""
     response.headers["Cache-Control"] = "public, max-age=60"
-    return {r.key: r.value for r in db.query(SiteSetting).all()}
+    data = {r.key: r.value for r in db.query(SiteSetting).all()}
+    # 右侧「下载 APP / 联系客服」按钮链接由环境变量配置（env 为准，不入库）
+    data["app_download_url"] = os.getenv("APP_DOWNLOAD_URL", "")
+    data["contact_url"] = os.getenv("CONTACT_URL", "")
+    return data
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -750,7 +754,7 @@ def admin_list_banners(
     _: User = Depends(require_admin),
 ):
     q = db.query(Banner)
-    if pos in ("top", "left", "right"):
+    if pos in ("top", "left", "right", "bottom"):
         q = q.filter(Banner.position == pos)
     banners = q.order_by(Banner.position, Banner.sort_order).all()
     return [{"id": b.id, "title": b.title, "image_url": b.image_url,
@@ -799,8 +803,8 @@ async def admin_add_banner(
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
-    if position not in ("top", "left", "right"):
-        raise HTTPException(400, "position must be top/left/right")
+    if position not in ("top", "left", "right", "bottom"):
+        raise HTTPException(400, "position must be top/left/right/bottom")
     try:
         link = link_url.strip() or None
         if not _is_safe_url(link):
@@ -825,6 +829,7 @@ async def admin_edit_banner(
     image_url:  str = Form(""),
     link_url:   str = Form(""),
     media_type: str = Form("image"),
+    position:   str = Form(""),
     sort_order: int = Form(0),
     duration:   int = Form(3000),
     media_file: Optional[UploadFile] = File(None),
@@ -838,6 +843,8 @@ async def admin_edit_banner(
         link = link_url.strip() or None
         if not _is_safe_url(link):
             raise HTTPException(400, "Invalid link URL (must start with http://, https:// or /)")
+        if position in ("top", "left", "right", "bottom"):
+            b.position = position           # 允许编辑时换位置（含新增的 bottom）
         old_media = b.image_url
         url, mt = await _resolve_banner_media(media_file, image_url, media_type)
         # 换了媒体（上传新文件或改了 URL）就删掉旧的存储文件
