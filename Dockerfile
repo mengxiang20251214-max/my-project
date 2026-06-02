@@ -2,8 +2,10 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# ffmpeg：视频封面自动提取依赖它（缺了的话封面会静默回退到占位图）
-RUN apt-get update && apt-get install -y gcc curl ffmpeg && rm -rf /var/lib/apt/lists/*
+# ffmpeg：视频封面自动提取依赖它；postgresql-client：数据库备份用的 pg_dump
+# （若服务端 PG 版本更高导致 pg_dump 版本不匹配，备份脚本会自动回退到逻辑导出）
+RUN apt-get update && apt-get install -y gcc curl ffmpeg postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

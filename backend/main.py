@@ -51,6 +51,46 @@ _extra = os.getenv("EXTRA_CORS_ORIGIN")
 if _extra:
     ALLOWED_ORIGINS.append(_extra.strip())
 
+# ── 数据库自动备份调度 ────────────────────────────────────────────────────────
+_scheduler = None
+
+
+def _start_backup_scheduler():
+    """按 BACKUP_* 环境变量启动每日自动备份（仅 Postgres + BACKUP_ENABLED 时）。"""
+    global _scheduler
+    if os.getenv("BACKUP_ENABLED", "false").strip().lower() not in ("1", "true", "yes", "on"):
+        logger.info("BACKUP_ENABLED 未开启，跳过自动备份调度")
+        return
+    from .backup_db import is_postgres, run_backup
+    if not is_postgres():
+        logger.info("当前不是 PostgreSQL，跳过自动备份调度")
+        return
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+        from apscheduler.triggers.cron import CronTrigger
+        cron = os.getenv("BACKUP_SCHEDULE", "0 2 * * *")
+        tz = os.getenv("BACKUP_TZ", "UTC")
+        sched = BackgroundScheduler(timezone=tz)
+        sched.add_job(run_backup, CronTrigger.from_crontab(cron, timezone=tz),
+                      id="db_backup", replace_existing=True, misfire_grace_time=3600,
+                      coalesce=True, max_instances=1)
+        sched.start()
+        _scheduler = sched
+        logger.info("已启动数据库自动备份：cron='%s' tz=%s", cron, tz)
+    except Exception as exc:
+        logger.exception("启动备份调度失败: %s", exc)
+
+
+def _stop_backup_scheduler():
+    global _scheduler
+    if _scheduler:
+        try:
+            _scheduler.shutdown(wait=False)
+        except Exception:
+            pass
+        _scheduler = None
+
+
 # ── 应用初始化 ────────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -66,7 +106,9 @@ async def lifespan(app: FastAPI):
         _seed_taxonomy(db)
     finally:
         db.close()
+    _start_backup_scheduler()
     yield
+    _stop_backup_scheduler()
 
 
 app = FastAPI(title="VideoHub Pro API", version="4.0.0",
@@ -650,6 +692,25 @@ def admin_backfill_covers(
     for vid in pending:
         background_tasks.add_task(_cover_bg, vid)   # 无本地副本，任务内按 URL 取
     return {"ok": True, "scheduled": len(pending)}
+
+
+# ── 数据库备份 ────────────────────────────────────────────────────────────────
+@app.post("/api/admin/backup", tags=["admin"])
+async def admin_run_backup(_: User = Depends(require_admin)):
+    """手动触发一次数据库备份（导出 → 上传 R2 → 清理旧备份）。"""
+    from starlette.concurrency import run_in_threadpool
+    from .backup_db import run_backup
+    res = await run_in_threadpool(run_backup)   # pg_dump 是阻塞调用，丢线程池里跑
+    if not res.get("ok"):
+        raise HTTPException(400, res.get("error", "Backup failed"))
+    return res
+
+
+@app.get("/api/admin/backups", tags=["admin"])
+def admin_list_backups(_: User = Depends(require_admin)):
+    """列出 R2 上的全部数据库备份（按时间倒序）。"""
+    from .backup_db import list_backups
+    return {"items": list_backups()}
 
 
 # ── 分类管理 ─────────────────────────────────────────────────────────────────

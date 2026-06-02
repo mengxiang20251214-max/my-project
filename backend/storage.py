@@ -59,6 +59,14 @@ class BaseStorage:
     def key_from_url(self, url: str) -> Optional[str]:
         raise NotImplementedError
 
+    def list_objects(self, prefix: str) -> list:
+        """列出某前缀下的对象，返回 [{key, size, last_modified}]（备份列表/清理用）。"""
+        raise NotImplementedError
+
+    def delete_key(self, key: str) -> None:
+        """按 key 直接删除对象。"""
+        raise NotImplementedError
+
 
 # ── 本地磁盘 ──────────────────────────────────────────────────────────────────
 class LocalStorage(BaseStorage):
@@ -116,12 +124,32 @@ class LocalStorage(BaseStorage):
         key = self.key_from_url(url)
         if not key:
             return
+        self.delete_key(key)
+
+    def delete_key(self, key) -> None:
         p = self._path(key)
         if os.path.isfile(p):
             try:
                 os.remove(p)
             except OSError as exc:
                 logger.warning("本地删除失败 %s: %s", p, exc)
+
+    def list_objects(self, prefix) -> list:
+        import datetime as _dt
+        base = self._path(prefix)
+        out = []
+        if not os.path.isdir(base):
+            return out
+        for entry in os.scandir(base):
+            if entry.is_file():
+                key = f"{prefix.rstrip('/')}/{entry.name}"
+                st = entry.stat()
+                out.append({
+                    "key": key,
+                    "size": st.st_size,
+                    "last_modified": _dt.datetime.utcfromtimestamp(st.st_mtime),
+                })
+        return out
 
 
 # ── Cloudflare R2（S3 兼容）───────────────────────────────────────────────────
@@ -198,12 +226,29 @@ class R2Storage(BaseStorage):
 
     def delete(self, url) -> None:
         key = self.key_from_url(url)
-        if not key:
-            return
+        if key:
+            self.delete_key(key)
+
+    def delete_key(self, key) -> None:
         try:
             self.client.delete_object(Bucket=self.bucket, Key=key)
         except Exception as exc:
             logger.warning("R2 删除失败 %s: %s", key, exc)
+
+    def list_objects(self, prefix) -> list:
+        out = []
+        try:
+            paginator = self.client.get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+                for obj in page.get("Contents", []):
+                    out.append({
+                        "key": obj["Key"],
+                        "size": obj["Size"],
+                        "last_modified": obj["LastModified"],
+                    })
+        except Exception as exc:
+            logger.warning("R2 列举失败 prefix=%s: %s", prefix, exc)
+        return out
 
 
 # ── 工厂：按 STORAGE_BACKEND 构建单例 ─────────────────────────────────────────

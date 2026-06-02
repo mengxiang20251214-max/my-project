@@ -12,3 +12,5 @@ Pillow>=10.4.0
 boto3>=1.34.0
 # PostgreSQL 驱动（Railway 用 Postgres 时 SQLAlchemy 需要它；本地 SQLite 用不到但装着无害）
 psycopg2-binary>=2.9.9
+# 定时任务调度（每日自动备份数据库到 R2）
+apscheduler>=3.10.0
