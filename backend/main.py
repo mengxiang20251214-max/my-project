@@ -433,9 +433,31 @@ def public_settings(response: Response, db: Session = Depends(get_db)):
     """获取网站公开配置。"""
     response.headers["Cache-Control"] = "public, max-age=60"
     data = {r.key: r.value for r in db.query(SiteSetting).all()}
-    # 右侧「下载 APP / 联系客服」按钮链接由环境变量配置（env 为准，不入库）
-    data["app_download_url"] = os.getenv("APP_DOWNLOAD_URL", "")
-    data["contact_url"] = os.getenv("CONTACT_URL", "")
+
+    # 右侧「下载 APP / 联系客服」按钮：每组支持 2 个，链接 + 名称由环境变量配置
+    # （env 为准，不入库；只返回真正配了链接的项）
+    def _env_buttons(specs):
+        out = []
+        for url_key, name_key, default_name in specs:
+            url = (os.getenv(url_key) or "").strip()
+            if url:
+                out.append({"name": (os.getenv(name_key) or "").strip() or default_name,
+                            "url": url})
+        return out
+
+    data["download_apps"] = _env_buttons([
+        ("APP_DOWNLOAD_URL_1", "APP_DOWNLOAD_NAME_1", "Download"),
+        ("APP_DOWNLOAD_URL_2", "APP_DOWNLOAD_NAME_2", "Download"),
+    ])
+    data["contacts"] = _env_buttons([
+        ("CONTACT_URL_1", "CONTACT_NAME_1", "Contact"),
+        ("CONTACT_URL_2", "CONTACT_NAME_2", "Contact"),
+    ])
+    # 向后兼容：保留旧单值字段（优先旧 env，否则取新数组第一个）
+    data["app_download_url"] = (os.getenv("APP_DOWNLOAD_URL", "")
+                                or (data["download_apps"][0]["url"] if data["download_apps"] else ""))
+    data["contact_url"] = (os.getenv("CONTACT_URL", "")
+                           or (data["contacts"][0]["url"] if data["contacts"] else ""))
     return data
 
 
