@@ -24,6 +24,7 @@ from .storage import STORAGE
 from .api import videos as videos_router
 from .api import categories as categories_router
 from .api import users as users_router
+from . import chunk_upload
 
 logger = logging.getLogger("videohub")
 
@@ -127,6 +128,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 app.include_router(videos_router.router,     prefix="/api")
 app.include_router(categories_router.router, prefix="/api")
 app.include_router(users_router.router,      prefix="/api")
+app.include_router(chunk_upload.router,      prefix="/api")   # 分片上传（大文件）
 
 
 # ── Pydantic 输入模型 ─────────────────────────────────────────────────────────
