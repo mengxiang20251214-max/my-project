@@ -144,6 +144,12 @@ class SettingsUpdate(BaseModel):
     site_description: Optional[str] = None
     site_keywords: Optional[str] = None
     footer_text: Optional[str] = None
+    # 顶部公告栏（后台可编辑，存 SiteSetting；未编辑时回退到环境变量 ANNOUNCEMENT_*）
+    announcement_enabled: Optional[str] = None
+    announcement_text: Optional[str] = None
+    announcement_link: Optional[str] = None
+    announcement_auto_hide: Optional[str] = None
+    announcement_color: Optional[str] = None
 
 
 # ── 启动迁移 / 种子 ──────────────────────────────────────────────────────────
@@ -461,6 +467,37 @@ def public_settings(response: Response, db: Session = Depends(get_db)):
     data["contact_url"] = (os.getenv("CONTACT_URL", "")
                            or (data["contacts"][0]["url"] if data["contacts"] else ""))
     return data
+
+
+@app.get("/api/public/announcement", tags=["public"])
+def public_announcement(response: Response, db: Session = Depends(get_db)):
+    """顶部公告栏配置：DB(后台编辑) 优先，未设置则回退到环境变量 ANNOUNCEMENT_*。"""
+    import hashlib
+    response.headers["Cache-Control"] = "public, max-age=30"
+    s = {r.key: r.value for r in db.query(SiteSetting).all()}
+
+    def pick(db_key, env_key, default=""):
+        # DB 里存在该键（即使空字符串）就以 DB 为准（后台可清空/关闭）；否则用环境变量
+        if db_key in s and s[db_key] is not None:
+            return s[db_key]
+        return os.getenv(env_key, default)
+
+    enabled_raw = str(pick("announcement_enabled", "ANNOUNCEMENT_ENABLED", "")).strip().lower()
+    enabled = enabled_raw in ("1", "true", "yes", "on")
+    text = (pick("announcement_text", "ANNOUNCEMENT_TEXT", "") or "").strip()
+    link = (pick("announcement_link", "ANNOUNCEMENT_LINK", "") or "").strip()
+    color = (pick("announcement_color", "ANNOUNCEMENT_COLOR", "#6366f1") or "#6366f1").strip()
+    try:
+        auto_hide = max(0, int(pick("announcement_auto_hide", "ANNOUNCEMENT_AUTO_HIDE", "0") or 0))
+    except (TypeError, ValueError):
+        auto_hide = 0
+    # 内容指纹：文字/链接变化即换 version，前端据此「内容变了重新弹出」
+    version = hashlib.md5((text + "|" + link).encode("utf-8")).hexdigest()[:8] if text else ""
+    return {
+        "enabled": bool(enabled and text),
+        "text": text, "link": link, "auto_hide": auto_hide,
+        "color": color, "version": version,
+    }
 
 
 # ══════════════════════════════════════════════════════════════════════════════
