@@ -461,6 +461,7 @@ def public_settings(response: Response, db: Session = Depends(get_db)):
     data["contacts"] = _env_buttons([
         ("CONTACT_URL_1", "CONTACT_NAME_1", "Contact"),
         ("CONTACT_URL_2", "CONTACT_NAME_2", "Contact"),
+        ("CONTACT_URL_3", "CONTACT_NAME_3", "Contact"),
     ])
     # 向后兼容：保留旧单值字段（优先旧 env，否则取新数组第一个）
     data["app_download_url"] = (os.getenv("APP_DOWNLOAD_URL", "")
