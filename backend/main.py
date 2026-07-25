@@ -456,6 +456,7 @@ def public_settings(response: Response, db: Session = Depends(get_db)):
     data["download_apps"] = _env_buttons([
         ("APP_DOWNLOAD_URL_1", "APP_DOWNLOAD_NAME_1", "Download"),
         ("APP_DOWNLOAD_URL_2", "APP_DOWNLOAD_NAME_2", "Download"),
+        ("APP_DOWNLOAD_URL_3", "APP_DOWNLOAD_NAME_3", "Download"),
     ])
     data["contacts"] = _env_buttons([
         ("CONTACT_URL_1", "CONTACT_NAME_1", "Contact"),
