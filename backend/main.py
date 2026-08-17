@@ -16,10 +16,10 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
 
 from .database import engine, get_db, Base, SessionLocal
-from .models import Video, Category, User, Banner, SiteSetting, Country, VideoType
+from .models import Video, Category, User, SiteSetting, Country, VideoType
 from .auth import (get_current_user, require_admin,
                    verify_password, get_password_hash, create_access_token)
-from .utils import extract_cover, save_banner_file, BANNER_ALLOWED_EXT
+from .utils import extract_cover
 from .storage import STORAGE
 from .api import videos as videos_router
 from .api import categories as categories_router
@@ -98,12 +98,11 @@ async def lifespan(app: FastAPI):
     """启动时建表 / 迁移 / 播种种子数据（取代已弃用的 @app.on_event）。"""
     Base.metadata.create_all(bind=engine)
     _migrate_db()
-    for d in ["videos", "covers", "banners"]:
+    for d in ["videos", "covers"]:
         os.makedirs(os.path.join(UPLOAD_DIR, d), exist_ok=True)
     db: Session = next(get_db())
     try:
         _seed_data(db)
-        _seed_banners(db)
         _seed_taxonomy(db)
     finally:
         db.close()
@@ -212,11 +211,9 @@ def _migrate_db():
             if col not in video_cols:
                 conn.execute(text(ddl))
 
-        # banners：新增 media_type 列
+        # banners：广告功能已下线，清掉遗留表（一次性，之后 get_table_names 不再命中）
         if "banners" in sa_inspect(engine).get_table_names():
-            banner_cols = {c["name"] for c in sa_inspect(engine).get_columns("banners")}
-            if "media_type" not in banner_cols:
-                conn.execute(text("ALTER TABLE banners ADD COLUMN media_type VARCHAR(10) DEFAULT 'image'"))
+            conn.execute(text("DROP TABLE banners"))
 
         conn.commit()
 
@@ -252,27 +249,6 @@ def _seed_data(db: Session):
     ]:
         db.add(Video(title=title, video_url=url, video_type="url",
                      cover_url=cover, category_id=cats[cat].id, user_id=admin.id))
-    db.commit()
-
-
-def _seed_banners(db: Session):
-    if db.query(Banner).count() > 0:
-        return
-    for b in [
-        Banner(position="top",  title="顶部广告 A", duration=4000, sort_order=0, is_active=True,
-               image_url="https://picsum.photos/seed/top-a/1200/200", link_url="#"),
-        Banner(position="top",  title="顶部广告 B", duration=4000, sort_order=1, is_active=True,
-               image_url="https://picsum.photos/seed/top-b/1200/200", link_url="#"),
-        Banner(position="left", title="左侧广告 A", duration=5000, sort_order=0, is_active=True,
-               image_url="https://picsum.photos/seed/left-a/260/400", link_url="#"),
-        Banner(position="left", title="左侧广告 B", duration=5000, sort_order=1, is_active=True,
-               image_url="https://picsum.photos/seed/left-b/260/400", link_url="#"),
-        Banner(position="right",title="右侧广告 A", duration=5000, sort_order=0, is_active=True,
-               image_url="https://picsum.photos/seed/right-a/260/400",link_url="#"),
-        Banner(position="right",title="右侧广告 B", duration=5000, sort_order=1, is_active=True,
-               image_url="https://picsum.photos/seed/right-b/260/400",link_url="#"),
-    ]:
-        db.add(b)
     db.commit()
 
 
@@ -417,58 +393,11 @@ def health():
 # 公开 API
 # ══════════════════════════════════════════════════════════════════════════════
 
-@app.get("/api/public/banners", tags=["public"])
-def public_banners(response: Response, db: Session = Depends(get_db)):
-    """获取所有启用的 Banner，按位置分组。"""
-    # 公开数据变化不频繁，给 60s CDN/浏览器缓存，减轻首页每次访问的 DB 压力
-    response.headers["Cache-Control"] = "public, max-age=60"
-    rows = (db.query(Banner).filter(Banner.is_active == True)
-            .order_by(Banner.position, Banner.sort_order).all())
-    result: dict = {"top": [], "left": [], "right": [], "bottom": []}
-    for b in rows:
-        if b.position in result:
-            result[b.position].append({
-                "id": b.id, "title": b.title,
-                "image_url": b.image_url, "link_url": b.link_url,
-                "media_type": b.media_type or "image",
-                "duration": b.duration,
-            })
-    return result
-
-
 @app.get("/api/public/settings", tags=["public"])
 def public_settings(response: Response, db: Session = Depends(get_db)):
     """获取网站公开配置。"""
     response.headers["Cache-Control"] = "public, max-age=60"
-    data = {r.key: r.value for r in db.query(SiteSetting).all()}
-
-    # 右侧「下载 APP / 联系客服」按钮：每组支持 2 个，链接 + 名称由环境变量配置
-    # （env 为准，不入库；只返回真正配了链接的项）
-    def _env_buttons(specs):
-        out = []
-        for url_key, name_key, default_name in specs:
-            url = (os.getenv(url_key) or "").strip()
-            if url:
-                out.append({"name": (os.getenv(name_key) or "").strip() or default_name,
-                            "url": url})
-        return out
-
-    data["download_apps"] = _env_buttons([
-        ("APP_DOWNLOAD_URL_1", "APP_DOWNLOAD_NAME_1", "Download"),
-        ("APP_DOWNLOAD_URL_2", "APP_DOWNLOAD_NAME_2", "Download"),
-        ("APP_DOWNLOAD_URL_3", "APP_DOWNLOAD_NAME_3", "Download"),
-    ])
-    data["contacts"] = _env_buttons([
-        ("CONTACT_URL_1", "CONTACT_NAME_1", "Contact"),
-        ("CONTACT_URL_2", "CONTACT_NAME_2", "Contact"),
-        ("CONTACT_URL_3", "CONTACT_NAME_3", "Contact"),
-    ])
-    # 向后兼容：保留旧单值字段（优先旧 env，否则取新数组第一个）
-    data["app_download_url"] = (os.getenv("APP_DOWNLOAD_URL", "")
-                                or (data["download_apps"][0]["url"] if data["download_apps"] else ""))
-    data["contact_url"] = (os.getenv("CONTACT_URL", "")
-                           or (data["contacts"][0]["url"] if data["contacts"] else ""))
-    return data
+    return {r.key: r.value for r in db.query(SiteSetting).all()}
 
 
 @app.get("/api/public/announcement", tags=["public"])
@@ -517,7 +446,6 @@ def admin_stats(
     return {
         "videos":     db.query(Video).count(),
         "categories": db.query(Category).count(),
-        "banners":    db.query(Banner).filter(Banner.is_active == True).count(),
         "recent":     [_video_dict(v) for v in recent],
     }
 
@@ -806,181 +734,6 @@ def admin_del_category(
         raise HTTPException(404, "Category not found")
     db.query(Video).filter(Video.category_id == cid).update({"category_id": None})
     db.delete(cat); db.commit()
-    return {"ok": True}
-
-
-# ── Banner 管理 ──────────────────────────────────────────────────────────────
-@app.get("/api/admin/banners", tags=["admin"])
-def admin_list_banners(
-    pos: str = Query(""),
-    db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
-):
-    q = db.query(Banner)
-    if pos in ("top", "left", "right", "bottom"):
-        q = q.filter(Banner.position == pos)
-    banners = q.order_by(Banner.position, Banner.sort_order).all()
-    return [{"id": b.id, "title": b.title, "image_url": b.image_url,
-             "link_url": b.link_url, "position": b.position,
-             "media_type": b.media_type or "image",
-             "sort_order": b.sort_order, "duration": b.duration,
-             "is_active": b.is_active,
-             "created_at": b.created_at.strftime("%Y-%m-%d") if b.created_at else None}
-            for b in banners]
-
-
-async def _resolve_banner_media(
-    media_file: Optional[UploadFile],
-    image_url: str,
-    media_type: str,
-) -> tuple[Optional[str], str]:
-    """
-    解析 Banner 媒体来源：优先上传文件，其次填写的 URL。
-    返回 (最终 URL, media_type)。上传文件时 media_type 由扩展名自动判定。
-    """
-    if media_file and media_file.filename:
-        ext = os.path.splitext(media_file.filename)[1].lower()
-        if ext not in BANNER_ALLOWED_EXT:
-            raise HTTPException(400, f"Unsupported banner file type: {ext or 'unknown'}")
-        # 流式落到临时文件 → 交给存储层落库（本地 move / R2 上传）
-        tmp, mt, file_ext = await save_banner_file(media_file, STORAGE.temp_dir)
-        url = STORAGE.save_file(tmp, f"banners/{uuid.uuid4().hex}{file_ext}")
-        return url, mt
-    url = (image_url or "").strip() or None
-    if not _is_safe_url(url):
-        raise HTTPException(400, "Invalid media URL (must start with http://, https:// or /)")
-    mt = media_type if media_type in ("image", "gif", "video") else "image"
-    return url, mt
-
-
-@app.post("/api/admin/banners", tags=["admin"])
-async def admin_add_banner(
-    position:   str = Form(...),
-    title:      str = Form(""),
-    image_url:  str = Form(""),
-    link_url:   str = Form(""),
-    media_type: str = Form("image"),
-    sort_order: int = Form(0),
-    duration:   int = Form(3000),
-    media_file: Optional[UploadFile] = File(None),
-    db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
-):
-    if position not in ("top", "left", "right", "bottom"):
-        raise HTTPException(400, "position must be top/left/right/bottom")
-    try:
-        link = link_url.strip() or None
-        if not _is_safe_url(link):
-            raise HTTPException(400, "Invalid link URL (must start with http://, https:// or /)")
-        url, mt = await _resolve_banner_media(media_file, image_url, media_type)
-        b = Banner(position=position, title=title.strip() or None,
-                   image_url=url, link_url=link,
-                   media_type=mt, sort_order=sort_order, duration=max(500, duration))
-        db.add(b); db.commit(); db.refresh(b)
-        return {"ok": True, "id": b.id, "image_url": url, "media_type": mt}
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.exception("Add banner failed: %s", exc)
-        raise HTTPException(500, f"Add banner failed: {exc}")
-
-
-@app.post("/api/admin/banners/{bid}/edit", tags=["admin"])
-async def admin_edit_banner(
-    bid: int,
-    title:      str = Form(""),
-    image_url:  str = Form(""),
-    link_url:   str = Form(""),
-    media_type: str = Form("image"),
-    position:   str = Form(""),
-    sort_order: int = Form(0),
-    duration:   int = Form(3000),
-    media_file: Optional[UploadFile] = File(None),
-    db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
-):
-    b = db.query(Banner).filter(Banner.id == bid).first()
-    if not b:
-        raise HTTPException(404, "Banner not found")
-    try:
-        link = link_url.strip() or None
-        if not _is_safe_url(link):
-            raise HTTPException(400, "Invalid link URL (must start with http://, https:// or /)")
-        if position in ("top", "left", "right", "bottom"):
-            b.position = position           # 允许编辑时换位置（含新增的 bottom）
-        old_media = b.image_url
-        url, mt = await _resolve_banner_media(media_file, image_url, media_type)
-        # 换了媒体（上传新文件或改了 URL）就删掉旧的存储文件
-        if old_media and old_media != url:
-            STORAGE.delete(old_media)
-        b.title      = title.strip() or None
-        b.image_url  = url
-        b.link_url   = link
-        b.media_type = mt
-        b.sort_order = sort_order
-        b.duration   = max(500, duration)
-        db.commit()
-        return {"ok": True, "image_url": url, "media_type": mt}
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.exception("Edit banner failed: %s", exc)
-        raise HTTPException(500, f"Edit banner failed: {exc}")
-
-
-@app.post("/api/admin/banners/{bid}/move", tags=["admin"])
-def admin_move_banner(
-    bid: int,
-    dir: str = Query(..., pattern="^(up|down)$"),
-    db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
-):
-    """上移/下移 Banner：与同一位置相邻的那条交换 sort_order（服务端原子完成）。"""
-    b = db.query(Banner).filter(Banner.id == bid).first()
-    if not b:
-        raise HTTPException(404, "Banner not found")
-    # 同位置、按 (sort_order, id) 排好序的邻居
-    siblings = (db.query(Banner).filter(Banner.position == b.position)
-                .order_by(Banner.sort_order, Banner.id).all())
-    idx = next((i for i, x in enumerate(siblings) if x.id == bid), None)
-    swap_idx = idx - 1 if dir == "up" else idx + 1
-    if idx is None or swap_idx < 0 or swap_idx >= len(siblings):
-        return {"ok": True, "moved": False}   # 已经在顶/底，无需移动
-    other = siblings[swap_idx]
-    b.sort_order, other.sort_order = other.sort_order, b.sort_order
-    # sort_order 相等时再用 id 兜底排序会失效，确保两者不同
-    if b.sort_order == other.sort_order:
-        other.sort_order += (1 if dir == "up" else -1)
-    db.commit()
-    return {"ok": True, "moved": True}
-
-
-@app.post("/api/admin/banners/{bid}/toggle", tags=["admin"])
-def admin_toggle_banner(
-    bid: int,
-    db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
-):
-    b = db.query(Banner).filter(Banner.id == bid).first()
-    if not b:
-        raise HTTPException(404, "Banner not found")
-    b.is_active = not b.is_active
-    db.commit()
-    return {"ok": True, "is_active": b.is_active}
-
-
-@app.delete("/api/admin/banners/{bid}", tags=["admin"])
-def admin_del_banner(
-    bid: int,
-    db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
-):
-    b = db.query(Banner).filter(Banner.id == bid).first()
-    if not b:
-        raise HTTPException(404, "Banner not found")
-    if b.image_url:
-        STORAGE.delete(b.image_url)          # 清掉存储里的 Banner 媒体文件
-    db.delete(b); db.commit()
     return {"ok": True}
 
 

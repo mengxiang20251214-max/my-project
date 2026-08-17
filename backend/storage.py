@@ -6,7 +6,7 @@
 上传的视频还需要本地文件给 ffmpeg 抽封面，所以接口区分两类写入：
 
 - ``save_file(src, key)``  —— **消费** src：本地存储把临时文件 move 到最终位置，
-  R2 把它上传后删掉本地。封面 JPG、Banner 图都走这个。
+  R2 把它上传后删掉本地。封面 JPG 走这个。
 - ``persist(src, key)``    —— **保留** src 供后续读取（抽封面），返回
   ``(url, local_path)``，调用方用完后调 ``release(local_path)``。视频走这个。
 

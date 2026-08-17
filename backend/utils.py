@@ -1,67 +1,11 @@
-"""共享工具函数（封面提取、Banner 文件保存等）。"""
+"""共享工具函数（封面提取等）。"""
 import logging
 import os
 import shutil
 import subprocess
-import uuid
 from typing import Optional
 
-import aiofiles
-
 logger = logging.getLogger("videohub.utils")
-
-# 流式落盘的分块大小（1MB）；Banner 视频可能很大，分块写避免一次性读进内存
-CHUNK_SIZE = 1024 * 1024
-
-# Banner 允许的上传格式 → 媒体类型
-BANNER_IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp"}
-BANNER_GIF_EXT   = {".gif"}
-BANNER_VIDEO_EXT = {".mp4", ".webm", ".mov", ".m4v"}
-BANNER_ALLOWED_EXT = BANNER_IMAGE_EXT | BANNER_GIF_EXT | BANNER_VIDEO_EXT
-
-
-def banner_media_type_for(ext: str) -> str:
-    """根据扩展名推断 Banner 媒体类型：image / gif / video。"""
-    ext = ext.lower()
-    if ext in BANNER_VIDEO_EXT:
-        return "video"
-    if ext in BANNER_GIF_EXT:
-        return "gif"
-    return "image"
-
-
-async def save_banner_file(file, temp_dir: str) -> tuple[str, str, str]:
-    """
-    异步流式把上传的 Banner 文件（图片/GIF/视频）写到临时目录，交给存储层落库。
-
-    Banner 允许任意大小，所以用 aiofiles 分块写入，避免整文件读进内存、
-    也不阻塞事件循环。落库（本地 move / R2 上传）由调用方的 STORAGE 完成。
-
-    Args:
-        file:     FastAPI UploadFile
-        temp_dir: 临时目录（STORAGE.temp_dir）
-
-    Returns:
-        (临时文件绝对路径, media_type, 扩展名)，如 ("/.../xxx.mp4", "video", ".mp4")
-
-    Raises:
-        ValueError: 扩展名不被允许
-    """
-    ext = os.path.splitext(file.filename or "")[1].lower()
-    if ext not in BANNER_ALLOWED_EXT:
-        raise ValueError(f"不支持的 Banner 文件类型: {ext or '未知'}")
-    os.makedirs(temp_dir, exist_ok=True)
-    dest = os.path.abspath(os.path.join(temp_dir, f"{uuid.uuid4().hex}{ext}"))
-    try:
-        await file.seek(0)
-        async with aiofiles.open(dest, "wb") as out:
-            while chunk := await file.read(CHUNK_SIZE):
-                await out.write(chunk)
-    except Exception:
-        if os.path.exists(dest):
-            os.remove(dest)
-        raise
-    return dest, banner_media_type_for(ext), ext
 
 
 def extract_cover(video_abs: str, covers_dir: str, stem: str) -> Optional[str]:

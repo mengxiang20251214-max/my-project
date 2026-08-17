@@ -95,24 +95,6 @@ class Video(Base):
         return self.video_url
 
 
-class Banner(Base):
-    """Banner 轮播表：顶部/左侧/右侧三个位置。"""
-    __tablename__ = "banners"
-
-    id:         Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    title:      Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    image_url:  Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
-    link_url:   Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
-    # 媒体类型：image=普通图片  gif=动图  video=视频(mp4/webm)
-    media_type: Mapped[str] = mapped_column(String(10), default="image")
-    # top=顶部全宽轮播  left=左侧侧边栏  right=右侧侧边栏
-    position:   Mapped[str] = mapped_column(String(10), nullable=False, index=True)
-    sort_order: Mapped[int] = mapped_column(Integer, default=0)
-    duration:   Mapped[int] = mapped_column(Integer, default=3000)  # autoplay 间隔 ms
-    is_active:  Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-
 class SiteSetting(Base):
     """网站全局配置（键值对）。"""
     __tablename__ = "site_settings"
