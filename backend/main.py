@@ -149,6 +149,44 @@ class SettingsUpdate(BaseModel):
     announcement_link: Optional[str] = None
     announcement_auto_hide: Optional[str] = None
     announcement_color: Optional[str] = None
+    # 顶部 Logo 跳转网址：留空 = 返回首页；只接受完整的 http:// 或 https:// 地址
+    logo_link: Optional[str] = None
+
+
+def normalize_http_url(value: Optional[str], max_len: int = 2048) -> Optional[str]:
+    """校验并规范化外部网址。
+
+    返回值：None = 不合法；'' = 留空（清除）；其他 = 去掉首尾空白后的合法网址。
+    只接受带主机名的完整 http:// 或 https:// 地址，拒绝 javascript:、data:、
+    协议相对地址（//host）、带账号密码（user@host）及含空白/控制字符的输入。
+    """
+    from urllib.parse import urlsplit
+    s = (value or "").strip()
+    if not s:
+        return ""
+    if len(s) > max_len or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in s):
+        return None
+    if not re.match(r"^https?://", s, re.IGNORECASE):
+        return None
+    try:
+        parts = urlsplit(s)
+        host = parts.hostname
+        _ = parts.port            # 端口非法时抛 ValueError
+    except ValueError:
+        return None
+    if parts.scheme.lower() not in ("http", "https") or not host or "@" in parts.netloc:
+        return None
+    return s
+
+
+# 公开接口使用明确白名单，不返回整张设置表。
+# 公告栏 5 个字段是原有公开字段（本身也经 /api/public/announcement 公开），为兼容旧调用方保留。
+PUBLIC_SETTING_KEYS = (
+    "site_name", "site_description", "site_keywords", "footer_text",
+    "announcement_enabled", "announcement_text", "announcement_link",
+    "announcement_auto_hide", "announcement_color",
+    "logo_link",
+)
 
 
 # ── 启动迁移 / 种子 ──────────────────────────────────────────────────────────
@@ -395,9 +433,14 @@ def health():
 
 @app.get("/api/public/settings", tags=["public"])
 def public_settings(response: Response, db: Session = Depends(get_db)):
-    """获取网站公开配置。"""
+    """获取网站公开配置（白名单字段）。"""
     response.headers["Cache-Control"] = "public, max-age=60"
-    return {r.key: r.value for r in db.query(SiteSetting).all()}
+    rows = {r.key: r.value for r in db.query(SiteSetting)
+                                 .filter(SiteSetting.key.in_(PUBLIC_SETTING_KEYS)).all()}
+    data = {k: rows[k] for k in PUBLIC_SETTING_KEYS if k in rows and k != "logo_link"}
+    # 读取时再校验一次：库里即使有非法值，也不会下发给前台
+    data["logo_link"] = normalize_http_url(rows.get("logo_link")) or ""
+    return data
 
 
 @app.get("/api/public/announcement", tags=["public"])
@@ -753,6 +796,11 @@ def admin_save_settings(
     _: User = Depends(require_admin),
 ):
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if "logo_link" in updates:
+        link = normalize_http_url(updates["logo_link"])
+        if link is None:
+            raise HTTPException(400, "Logo 跳转网址必须是完整的 http:// 或 https:// 地址，例如 https://example.com")
+        updates["logo_link"] = link
     for k, v in updates.items():
         row = db.query(SiteSetting).filter(SiteSetting.key == k).first()
         if row:
